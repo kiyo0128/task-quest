@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:html' as html;
 
 void main() {
   runApp(TaskQuestApp());
@@ -418,6 +419,13 @@ class CharacterScreen extends StatelessWidget {
             centerTitle: true,
             backgroundColor: Colors.blue[800],
             foregroundColor: Colors.white,
+            actions: [
+              IconButton(
+                icon: Icon(Icons.bug_report),
+                onPressed: () => _showDebugInfo(context, gameProvider),
+                tooltip: 'デバッグ情報',
+              ),
+            ],
           ),
           body: Container(
             decoration: BoxDecoration(
@@ -598,6 +606,62 @@ class CharacterScreen extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+
+  void _showDebugInfo(BuildContext context, GameProvider gameProvider) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('🔧 デバッグ情報'),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('📱 プラットフォーム: Web'),
+              SizedBox(height: 8),
+              Text('💾 キャラクター: ${gameProvider.character != null ? "保存済み" : "未保存"}'),
+              if (gameProvider.character != null) ...[
+                SizedBox(height: 4),
+                Text('名前: ${gameProvider.character!.name}'),
+                Text('職業: ${gameProvider.character!.profession}'),
+                Text('レベル: ${gameProvider.character!.level}'),
+                Text('経験値: ${gameProvider.character!.experience}'),
+              ],
+              SizedBox(height: 8),
+              Text('📋 タスク数: ${gameProvider.tasks.length}'),
+              SizedBox(height: 16),
+              Text(
+                '⚠️ データが保存されない場合：\n'
+                '• ブラウザのプライベートモード\n'
+                '• ブラウザのデータクリア\n'
+                '• ローカルストレージの制限',
+                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              await gameProvider.resetAllData();
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('データをリセットしました'),
+                  backgroundColor: Colors.orange[600],
+                ),
+              );
+            },
+            child: Text('データリセット', style: TextStyle(color: Colors.red)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('閉じる'),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1150,24 +1214,72 @@ class GameProvider with ChangeNotifier {
 
   // 初期化
   Future<void> initialize() async {
+    print('🔍 GameProvider初期化開始...');
     _isLoading = true;
     notifyListeners();
 
     try {
-      final prefs = await SharedPreferences.getInstance();
+      // Web用のローカルストレージも試す
+      String? characterJson;
+      List<String> tasksJson = [];
+      
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        print('📱 SharedPreferences取得成功');
+        
+        characterJson = prefs.getString('taskquest_character');
+        tasksJson = prefs.getStringList('taskquest_tasks') ?? [];
+        
+        print('📖 SharedPreferences - キャラクター: $characterJson');
+        print('📖 SharedPreferences - タスク: ${tasksJson.length}件');
+      } catch (e) {
+        print('⚠️ SharedPreferences エラー: $e');
+      }
+      
+      // SharedPreferencesにデータがない場合、LocalStorageを試す
+      if ((characterJson == null || characterJson.isEmpty) && html.window.localStorage.containsKey('taskquest_character_backup')) {
+        characterJson = html.window.localStorage['taskquest_character_backup'];
+        final tasksJsonString = html.window.localStorage['taskquest_tasks_backup'];
+        if (tasksJsonString != null && tasksJsonString.isNotEmpty) {
+          tasksJson = (json.decode(tasksJsonString) as List).cast<String>();
+        }
+        print('🔄 LocalStorage から復元 - キャラクター: $characterJson');
+        print('🔄 LocalStorage から復元 - タスク: ${tasksJson.length}件');
+      }
       
       // キャラクター読み込み
-      final characterJson = prefs.getString('taskquest_character');
-      if (characterJson != null) {
-        _character = Character.fromJson(characterJson);
+      if (characterJson != null && characterJson.isNotEmpty) {
+        try {
+          _character = Character.fromJson(characterJson);
+          print('✅ キャラクター読み込み成功: ${_character?.name} (${_character?.profession})');
+        } catch (e) {
+          print('❌ キャラクターデータ解析エラー: $e');
+          // 破損したデータをクリア
+          await _clearAllData();
+        }
+      } else {
+        print('📭 保存されたキャラクターデータがありません');
       }
       
       // タスク読み込み
-      final tasksJson = prefs.getStringList('taskquest_tasks') ?? [];
-      _tasks = tasksJson.map((taskJson) => Task.fromJson(taskJson)).toList();
+      print('📖 保存されたタスクデータ: ${tasksJson.length}件');
+      
+      try {
+        _tasks = tasksJson.map((taskJson) => Task.fromJson(taskJson)).toList();
+        print('✅ タスク読み込み成功: ${_tasks.length}件');
+      } catch (e) {
+        print('❌ タスクデータ解析エラー: $e');
+        _tasks = [];
+        // 破損したデータをクリア
+        await _clearAllData();
+      }
+      
+      print('🎯 初期化完了 - キャラクター: ${_character != null ? "あり" : "なし"}, タスク: ${_tasks.length}件');
       
     } catch (e) {
-      print('初期化エラー: $e');
+      print('❌ 初期化エラー: $e');
+      _character = null;
+      _tasks = [];
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -1176,56 +1288,101 @@ class GameProvider with ChangeNotifier {
 
   // キャラクター作成
   Future<void> createCharacter(String profession, String name) async {
-    _character = Character.create(profession, name);
-    await _saveCharacter();
-    notifyListeners();
+    print('🎭 キャラクター作成開始: $name ($profession)');
+    
+    try {
+      _character = Character.create(profession, name);
+      print('✅ キャラクターオブジェクト作成成功: ${_character?.toJson()}');
+      
+      await _saveCharacter();
+      print('💾 キャラクターデータ保存完了');
+      
+      notifyListeners();
+      print('🔄 UI更新通知完了');
+      
+    } catch (e) {
+      print('❌ キャラクター作成エラー: $e');
+      rethrow;
+    }
   }
 
   // タスク追加
   Future<void> addTask(String title, String difficulty) async {
-    final task = Task.create(title, difficulty);
-    _tasks.add(task);
-    await _saveTasks();
-    notifyListeners();
+    print('➕ タスク追加: $title ($difficulty)');
+    
+    try {
+      final task = Task.create(title, difficulty);
+      _tasks.add(task);
+      await _saveTasks();
+      notifyListeners();
+      print('✅ タスク追加完了');
+    } catch (e) {
+      print('❌ タスク追加エラー: $e');
+      rethrow;
+    }
   }
 
   // タスク完了
   Future<void> completeTask(Task task) async {
-    final index = _tasks.indexWhere((t) => t.id == task.id);
-    if (index != -1) {
-      _tasks[index] = task.copyWith(
-        isCompleted: true,
-        completedAt: DateTime.now(),
-      );
-      
-      // 経験値獲得
-      final expGained = _difficultyExp[task.difficulty] ?? 0;
-      _gainExperience(expGained);
-      
-      await _saveTasks();
-      await _saveCharacter();
-      notifyListeners();
+    print('✅ タスク完了: ${task.title}');
+    
+    try {
+      final index = _tasks.indexWhere((t) => t.id == task.id);
+      if (index != -1) {
+        _tasks[index] = task.copyWith(
+          isCompleted: true,
+          completedAt: DateTime.now(),
+        );
+        
+        // 経験値獲得
+        final expGained = _difficultyExp[task.difficulty] ?? 0;
+        _gainExperience(expGained);
+        
+        await _saveTasks();
+        await _saveCharacter();
+        notifyListeners();
+        print('✅ タスク完了処理完了');
+      }
+    } catch (e) {
+      print('❌ タスク完了エラー: $e');
+      rethrow;
     }
   }
 
   // タスク削除
   Future<void> deleteTask(Task task) async {
-    _tasks.removeWhere((t) => t.id == task.id);
-    await _saveTasks();
-    notifyListeners();
+    print('🗑️ タスク削除: ${task.title}');
+    
+    try {
+      _tasks.removeWhere((t) => t.id == task.id);
+      await _saveTasks();
+      notifyListeners();
+      print('✅ タスク削除完了');
+    } catch (e) {
+      print('❌ タスク削除エラー: $e');
+      rethrow;
+    }
   }
 
   // 経験値獲得
   void _gainExperience(int exp) {
     if (_character == null) return;
     
+    print('⭐ 経験値獲得: +${exp}XP');
+    
     int newExp = _character!.experience + exp;
     int newLevel = _character!.level;
+    int levelUps = 0;
     
     // レベルアップチェック
     while (newExp >= newLevel * 100) {
       newExp -= newLevel * 100;
       newLevel++;
+      levelUps++;
+    }
+    
+    if (levelUps > 0) {
+      print('🎉 レベルアップ! ${_character!.level} → $newLevel (${levelUps}回)');
     }
     
     _character = _character!.copyWith(
@@ -1236,15 +1393,102 @@ class GameProvider with ChangeNotifier {
 
   // データ保存
   Future<void> _saveCharacter() async {
-    if (_character == null) return;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('taskquest_character', _character!.toJson());
+    if (_character == null) {
+      print('⚠️ 保存するキャラクターがありません');
+      return;
+    }
+    
+    try {
+      final characterJson = _character!.toJson();
+      
+      // SharedPreferences に保存
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final success = await prefs.setString('taskquest_character', characterJson);
+        print('💾 SharedPreferences キャラクター保存: ${success ? "成功" : "失敗"}');
+      } catch (e) {
+        print('⚠️ SharedPreferences 保存エラー: $e');
+      }
+      
+      // LocalStorage にもバックアップ保存
+      try {
+        html.window.localStorage['taskquest_character_backup'] = characterJson;
+        print('💾 LocalStorage バックアップ保存: 成功');
+      } catch (e) {
+        print('⚠️ LocalStorage 保存エラー: $e');
+      }
+      
+      print('✅ キャラクターデータ保存完了 - $characterJson');
+      
+    } catch (e) {
+      print('❌ キャラクター保存エラー: $e');
+      rethrow;
+    }
   }
 
   Future<void> _saveTasks() async {
-    final prefs = await SharedPreferences.getInstance();
-    final tasksJson = _tasks.map((task) => task.toJson()).toList();
-    await prefs.setStringList('taskquest_tasks', tasksJson);
+    try {
+      final tasksJson = _tasks.map((task) => task.toJson()).toList();
+      
+      // SharedPreferences に保存
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final success = await prefs.setStringList('taskquest_tasks', tasksJson);
+        print('💾 SharedPreferences タスク保存: ${success ? "成功" : "失敗"} - ${tasksJson.length}件');
+      } catch (e) {
+        print('⚠️ SharedPreferences タスク保存エラー: $e');
+      }
+      
+      // LocalStorage にもバックアップ保存
+      try {
+        html.window.localStorage['taskquest_tasks_backup'] = json.encode(tasksJson);
+        print('💾 LocalStorage タスクバックアップ保存: 成功 - ${tasksJson.length}件');
+      } catch (e) {
+        print('⚠️ LocalStorage タスク保存エラー: $e');
+      }
+      
+    } catch (e) {
+      print('❌ タスク保存エラー: $e');
+      rethrow;
+    }
+  }
+
+  // デバッグ用：データリセット機能
+  Future<void> resetAllData() async {
+    print('🔄 全データリセット開始...');
+    
+    try {
+      // SharedPreferences クリア
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.remove('taskquest_character');
+        await prefs.remove('taskquest_tasks');
+        print('🗑️ SharedPreferences クリア完了');
+      } catch (e) {
+        print('⚠️ SharedPreferences クリアエラー: $e');
+      }
+      
+      // LocalStorage クリア
+      try {
+        html.window.localStorage.remove('taskquest_character_backup');
+        html.window.localStorage.remove('taskquest_tasks_backup');
+        print('🗑️ LocalStorage クリア完了');
+      } catch (e) {
+        print('⚠️ LocalStorage クリアエラー: $e');
+      }
+      
+      _character = null;
+      _tasks = [];
+      notifyListeners();
+      
+      print('✅ 全データリセット完了');
+    } catch (e) {
+      print('❌ データリセットエラー: $e');
+    }
+  }
+
+  Future<void> _clearAllData() async {
+    await resetAllData();
   }
 }
 
