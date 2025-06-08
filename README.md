@@ -1,16 +1,117 @@
-# task_quest
+# 🎯 TaskQuest
 
-A new Flutter project.
+**タスク管理 × RPG育成アプリ**
 
-## Getting Started
+日常のタスクを完了することでキャラクターを育成できる、ゲーミフィケーション型のタスク管理アプリです。
 
-This project is a starting point for a Flutter application.
+## ✨ 特徴
 
-A few resources to get you started if this is your first Flutter project:
+- 🎮 **RPG要素**: タスク完了で経験値獲得、レベルアップ
+- ⚔️ **職業システム**: 4つの職業から選択（戦士、魔法使い、盗賊、僧侶）
+- 📋 **タスク管理**: 直感的なタスクの追加・完了・削除
+- 🎚️ **難易度システム**: 3段階の難易度設定（簡単・普通・難しい）
+- 📊 **統計機能**: 完了タスク数や進捗の可視化
+- 💾 **データ永続化**: ローカルストレージでデータを保存
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+## 🎯 主な機能
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+### キャラクター作成
+- 名前の設定
+- 4つの職業から選択
+- 各職業に専用のアイコンと特徴
+
+### タスク管理
+- **簡単** (🟢): +10XP
+- **普通** (🟡): +25XP  
+- **難しい** (🔴): +50XP
+
+### キャラクター育成
+- 経験値システム（100XPでレベルアップ）
+- 経験値バーによる進捗表示
+- 統計画面でタスク完了状況を確認
+
+## 🚀 セットアップ
+
+### 前提条件
+- Flutter 3.8.1 以上
+- Dart 3.8.1 以上
+
+### インストール
+
+1. リポジトリをクローン
+```bash
+git clone https://github.com/kiyo0128/task-quest.git
+cd task-quest
+```
+
+2. 依存関係をインストール
+```bash
+flutter pub get
+```
+
+3. アプリを起動
+```bash
+# Webブラウザで起動
+flutter run -d chrome
+
+# macOSアプリとして起動
+flutter run -d macos
+```
+
+## 📱 使い方
+
+### 1. キャラクター作成
+- アプリを初回起動時にキャラクター作成画面が表示されます
+- 名前を入力し、4つの職業から1つを選択
+- 「🚀 冒険を始める」ボタンで開始
+
+### 2. タスク管理
+- 「タスク」タブでタスクを管理
+- 新しいタスクを追加し、難易度を選択
+- タスク完了時にチェックボタンをタップ
+- 長押しでタスクを削除
+
+### 3. キャラクター確認
+- 「キャラクター」タブで現在のステータスを確認
+- レベル、経験値、統計情報を表示
+- 経験値バーで次のレベルまでの進捗を確認
+
+## 🏗️ 技術スタック
+
+- **Framework**: Flutter 3.32.2
+- **Language**: Dart 3.8.1
+- **State Management**: Provider
+- **Local Storage**: SharedPreferences
+- **UI**: Material Design
+
+## 📝 依存関係
+
+```yaml
+dependencies:
+  flutter:
+    sdk: flutter
+  provider: ^6.1.5
+  shared_preferences: ^2.5.3
+  cupertino_icons: ^1.0.8
+```
+
+## 🔮 今後の予定
+
+- 🏪 ショップ機能（アイテム購入）
+- 🏆 アチーブメントシステム
+- 📅 リマインダー機能
+- 🎨 テーマカスタマイズ
+- ☁️ クラウド同期
+
+## 🤝 コントリビューション
+
+プルリクエストやイシューの報告を歓迎します。
+
+## 📄 ライセンス
+
+このプロジェクトはMITライセンスの下で公開されています。
+
+## 🎯 開発者
+
+日常のタスク管理をより楽しくするために開発されました。
+ゲーミフィケーションの力で生産性を向上させましょう！
