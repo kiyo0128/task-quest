@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:html' as html;
+import 'package:flutter/foundation.dart';
 
 void main() {
   runApp(TaskQuestApp());
@@ -619,7 +619,7 @@ class CharacterScreen extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text('📱 プラットフォーム: Web'),
+              Text('📱 プラットフォーム: ${kIsWeb ? "Web" : "Desktop"}'),
               SizedBox(height: 8),
               Text('💾 キャラクター: ${gameProvider.character != null ? "保存済み" : "未保存"}'),
               if (gameProvider.character != null) ...[
@@ -634,9 +634,7 @@ class CharacterScreen extends StatelessWidget {
               SizedBox(height: 16),
               Text(
                 '⚠️ データが保存されない場合：\n'
-                '• ブラウザのプライベートモード\n'
-                '• ブラウザのデータクリア\n'
-                '• ローカルストレージの制限',
+                '${kIsWeb ? "• ブラウザのプライベートモード\n• ブラウザのデータクリア\n• ローカルストレージの制限" : "• アプリの権限設定\n• ストレージの容量不足"}',
                 style: TextStyle(fontSize: 12, color: Colors.grey[600]),
               ),
             ],
@@ -1219,7 +1217,7 @@ class GameProvider with ChangeNotifier {
     notifyListeners();
 
     try {
-      // Web用のローカルストレージも試す
+      // SharedPreferencesからデータを読み込み
       String? characterJson;
       List<String> tasksJson = [];
       
@@ -1234,17 +1232,6 @@ class GameProvider with ChangeNotifier {
         print('📖 SharedPreferences - タスク: ${tasksJson.length}件');
       } catch (e) {
         print('⚠️ SharedPreferences エラー: $e');
-      }
-      
-      // SharedPreferencesにデータがない場合、LocalStorageを試す
-      if ((characterJson == null || characterJson.isEmpty) && html.window.localStorage.containsKey('taskquest_character_backup')) {
-        characterJson = html.window.localStorage['taskquest_character_backup'];
-        final tasksJsonString = html.window.localStorage['taskquest_tasks_backup'];
-        if (tasksJsonString != null && tasksJsonString.isNotEmpty) {
-          tasksJson = (json.decode(tasksJsonString) as List).cast<String>();
-        }
-        print('🔄 LocalStorage から復元 - キャラクター: $characterJson');
-        print('🔄 LocalStorage から復元 - タスク: ${tasksJson.length}件');
       }
       
       // キャラクター読み込み
@@ -1410,14 +1397,6 @@ class GameProvider with ChangeNotifier {
         print('⚠️ SharedPreferences 保存エラー: $e');
       }
       
-      // LocalStorage にもバックアップ保存
-      try {
-        html.window.localStorage['taskquest_character_backup'] = characterJson;
-        print('💾 LocalStorage バックアップ保存: 成功');
-      } catch (e) {
-        print('⚠️ LocalStorage 保存エラー: $e');
-      }
-      
       print('✅ キャラクターデータ保存完了 - $characterJson');
       
     } catch (e) {
@@ -1439,14 +1418,6 @@ class GameProvider with ChangeNotifier {
         print('⚠️ SharedPreferences タスク保存エラー: $e');
       }
       
-      // LocalStorage にもバックアップ保存
-      try {
-        html.window.localStorage['taskquest_tasks_backup'] = json.encode(tasksJson);
-        print('💾 LocalStorage タスクバックアップ保存: 成功 - ${tasksJson.length}件');
-      } catch (e) {
-        print('⚠️ LocalStorage タスク保存エラー: $e');
-      }
-      
     } catch (e) {
       print('❌ タスク保存エラー: $e');
       rethrow;
@@ -1466,15 +1437,6 @@ class GameProvider with ChangeNotifier {
         print('🗑️ SharedPreferences クリア完了');
       } catch (e) {
         print('⚠️ SharedPreferences クリアエラー: $e');
-      }
-      
-      // LocalStorage クリア
-      try {
-        html.window.localStorage.remove('taskquest_character_backup');
-        html.window.localStorage.remove('taskquest_tasks_backup');
-        print('🗑️ LocalStorage クリア完了');
-      } catch (e) {
-        print('⚠️ LocalStorage クリアエラー: $e');
       }
       
       _character = null;
