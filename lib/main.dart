@@ -3,6 +3,131 @@ import 'package:provider/provider.dart';
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/foundation.dart';
+import 'dart:html' as html show window if (dart.library.html) 'dart:html';
+
+// プラットフォーム対応ストレージ
+class PlatformStorage {
+  static Future<String?> getString(String key) async {
+    try {
+      // Web環境の場合
+      if (kIsWeb) {
+        try {
+          final value = html.window.localStorage[key];
+          print('🌐 WebStorage 読み込み: $key = $value');
+          return value;
+        } catch (e) {
+          print('⚠️ WebStorage 読み込みエラー: $e');
+        }
+      }
+      
+      // SharedPreferencesをフォールバックとして使用
+      final prefs = await SharedPreferences.getInstance();
+      final value = prefs.getString(key);
+      print('📱 SharedPreferences 読み込み: $key = $value');
+      return value;
+    } catch (e) {
+      print('❌ ストレージ読み込みエラー: $e');
+      return null;
+    }
+  }
+
+  static Future<bool> setString(String key, String value) async {
+    try {
+      // Web環境の場合
+      if (kIsWeb) {
+        try {
+          html.window.localStorage[key] = value;
+          print('🌐 WebStorage 保存成功: $key');
+        } catch (e) {
+          print('⚠️ WebStorage 保存エラー: $e');
+        }
+      }
+      
+      // SharedPreferencesにも保存
+      final prefs = await SharedPreferences.getInstance();
+      final success = await prefs.setString(key, value);
+      print('📱 SharedPreferences 保存: $key = ${success ? "成功" : "失敗"}');
+      return success;
+    } catch (e) {
+      print('❌ ストレージ保存エラー: $e');
+      return false;
+    }
+  }
+
+  static Future<List<String>> getStringList(String key) async {
+    try {
+      // Web環境の場合
+      if (kIsWeb) {
+        try {
+          final value = html.window.localStorage[key];
+          if (value != null && value.isNotEmpty) {
+            final List<dynamic> decoded = json.decode(value);
+            final result = decoded.cast<String>();
+            print('🌐 WebStorage リスト読み込み: $key = ${result.length}件');
+            return result;
+          }
+        } catch (e) {
+          print('⚠️ WebStorage リスト読み込みエラー: $e');
+        }
+      }
+      
+      // SharedPreferencesをフォールバックとして使用
+      final prefs = await SharedPreferences.getInstance();
+      final result = prefs.getStringList(key) ?? [];
+      print('📱 SharedPreferences リスト読み込み: $key = ${result.length}件');
+      return result;
+    } catch (e) {
+      print('❌ ストレージリスト読み込みエラー: $e');
+      return [];
+    }
+  }
+
+  static Future<bool> setStringList(String key, List<String> value) async {
+    try {
+      // Web環境の場合
+      if (kIsWeb) {
+        try {
+          html.window.localStorage[key] = json.encode(value);
+          print('🌐 WebStorage リスト保存成功: $key = ${value.length}件');
+        } catch (e) {
+          print('⚠️ WebStorage リスト保存エラー: $e');
+        }
+      }
+      
+      // SharedPreferencesにも保存
+      final prefs = await SharedPreferences.getInstance();
+      final success = await prefs.setStringList(key, value);
+      print('📱 SharedPreferences リスト保存: $key = ${success ? "成功" : "失敗"}');
+      return success;
+    } catch (e) {
+      print('❌ ストレージリスト保存エラー: $e');
+      return false;
+    }
+  }
+
+  static Future<bool> remove(String key) async {
+    try {
+      // Web環境の場合
+      if (kIsWeb) {
+        try {
+          html.window.localStorage.remove(key);
+          print('🌐 WebStorage 削除成功: $key');
+        } catch (e) {
+          print('⚠️ WebStorage 削除エラー: $e');
+        }
+      }
+      
+      // SharedPreferencesからも削除
+      final prefs = await SharedPreferences.getInstance();
+      final success = await prefs.remove(key);
+      print('📱 SharedPreferences 削除: $key = ${success ? "成功" : "失敗"}');
+      return success;
+    } catch (e) {
+      print('❌ ストレージ削除エラー: $e');
+      return false;
+    }
+  }
+}
 
 void main() {
   runApp(TaskQuestApp());
@@ -1217,21 +1342,20 @@ class GameProvider with ChangeNotifier {
     notifyListeners();
 
     try {
-      // SharedPreferencesからデータを読み込み
+      // プラットフォーム対応ストレージからデータを読み込み
       String? characterJson;
       List<String> tasksJson = [];
       
       try {
-        final prefs = await SharedPreferences.getInstance();
-        print('📱 SharedPreferences取得成功');
+        print('📱 PlatformStorage からデータ読み込み開始...');
         
-        characterJson = prefs.getString('taskquest_character');
-        tasksJson = prefs.getStringList('taskquest_tasks') ?? [];
+        characterJson = await PlatformStorage.getString('taskquest_character');
+        tasksJson = await PlatformStorage.getStringList('taskquest_tasks');
         
-        print('📖 SharedPreferences - キャラクター: $characterJson');
-        print('📖 SharedPreferences - タスク: ${tasksJson.length}件');
+        print('📖 読み込み結果 - キャラクター: ${characterJson != null ? "あり" : "なし"}');
+        print('📖 読み込み結果 - タスク: ${tasksJson.length}件');
       } catch (e) {
-        print('⚠️ SharedPreferences エラー: $e');
+        print('⚠️ PlatformStorage エラー: $e');
       }
       
       // キャラクター読み込み
@@ -1388,13 +1512,12 @@ class GameProvider with ChangeNotifier {
     try {
       final characterJson = _character!.toJson();
       
-      // SharedPreferences に保存
+      // PlatformStorageに保存
       try {
-        final prefs = await SharedPreferences.getInstance();
-        final success = await prefs.setString('taskquest_character', characterJson);
-        print('💾 SharedPreferences キャラクター保存: ${success ? "成功" : "失敗"}');
+        final success = await PlatformStorage.setString('taskquest_character', characterJson);
+        print('💾 PlatformStorage キャラクター保存: ${success ? "成功" : "失敗"}');
       } catch (e) {
-        print('⚠️ SharedPreferences 保存エラー: $e');
+        print('⚠️ PlatformStorage 保存エラー: $e');
       }
       
       print('✅ キャラクターデータ保存完了 - $characterJson');
@@ -1409,13 +1532,12 @@ class GameProvider with ChangeNotifier {
     try {
       final tasksJson = _tasks.map((task) => task.toJson()).toList();
       
-      // SharedPreferences に保存
+      // PlatformStorageに保存
       try {
-        final prefs = await SharedPreferences.getInstance();
-        final success = await prefs.setStringList('taskquest_tasks', tasksJson);
-        print('💾 SharedPreferences タスク保存: ${success ? "成功" : "失敗"} - ${tasksJson.length}件');
+        final success = await PlatformStorage.setStringList('taskquest_tasks', tasksJson);
+        print('💾 PlatformStorage タスク保存: ${success ? "成功" : "失敗"} - ${tasksJson.length}件');
       } catch (e) {
-        print('⚠️ SharedPreferences タスク保存エラー: $e');
+        print('⚠️ PlatformStorage タスク保存エラー: $e');
       }
       
     } catch (e) {
@@ -1429,14 +1551,13 @@ class GameProvider with ChangeNotifier {
     print('🔄 全データリセット開始...');
     
     try {
-      // SharedPreferences クリア
+      // PlatformStorageクリア
       try {
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.remove('taskquest_character');
-        await prefs.remove('taskquest_tasks');
-        print('🗑️ SharedPreferences クリア完了');
+        await PlatformStorage.remove('taskquest_character');
+        await PlatformStorage.remove('taskquest_tasks');
+        print('🗑️ PlatformStorage クリア完了');
       } catch (e) {
-        print('⚠️ SharedPreferences クリアエラー: $e');
+        print('⚠️ PlatformStorage クリアエラー: $e');
       }
       
       _character = null;
