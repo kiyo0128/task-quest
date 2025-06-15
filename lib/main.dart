@@ -1056,12 +1056,12 @@ class _TaskScreenState extends State<TaskScreen> {
                                   width: 40,
                                   height: 40,
                                   decoration: BoxDecoration(
-                                    color: difficultyData['color'].withOpacity(0.1),
+                                    color: (difficultyData['color'] as Color).withOpacity(0.1),
                                     borderRadius: BorderRadius.circular(8),
                                   ),
                                   child: Center(
                                     child: Text(
-                                      difficultyData['icon'],
+                                      difficultyData['icon'] as String,
                                       style: TextStyle(fontSize: 20),
                                     ),
                                   ),
@@ -1082,7 +1082,7 @@ class _TaskScreenState extends State<TaskScreen> {
                                     Text(
                                       '${difficultyData['name']} (+${difficultyData['exp']}XP, +${_getDifficultyGold(task.difficulty)}G)',
                                       style: TextStyle(
-                                        color: difficultyData['color'],
+                                        color: difficultyData['color'] as Color,
                                         fontSize: 12,
                                         fontWeight: FontWeight.w500,
                                       ),
@@ -1362,12 +1362,12 @@ class _CalendarScreenState extends State<CalendarScreen> {
       itemCount: tasks.length,
       itemBuilder: (context, index) {
         final task = tasks[index];
-        final difficulties = {
-          'easy': {'name': '簡単', 'exp': 10, 'color': Colors.green, 'icon': '🟢'},
-          'normal': {'name': '普通', 'exp': 25, 'color': Colors.orange, 'icon': '🟡'},
-          'hard': {'name': '難しい', 'exp': 50, 'color': Colors.red, 'icon': '🔴'},
-        };
-        final difficultyData = difficulties[task.difficulty]!;
+                 final difficulties = {
+           'easy': {'name': '簡単', 'exp': 10, 'color': Colors.green, 'icon': '🟢'},
+           'normal': {'name': '普通', 'exp': 25, 'color': Colors.orange, 'icon': '🟡'},
+           'hard': {'name': '難しい', 'exp': 50, 'color': Colors.red, 'icon': '🔴'},
+         };
+         final difficultyData = difficulties[task.difficulty] ?? difficulties['normal']!;
         
         return Container(
           margin: EdgeInsets.only(bottom: 8),
@@ -1390,12 +1390,12 @@ class _CalendarScreenState extends State<CalendarScreen> {
               width: 40,
               height: 40,
               decoration: BoxDecoration(
-                color: difficultyData['color'].withOpacity(0.1),
+                color: (difficultyData['color'] as Color).withOpacity(0.1),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Center(
                 child: Text(
-                  difficultyData['icon'],
+                  difficultyData['icon'] as String,
                   style: TextStyle(fontSize: 20),
                 ),
               ),
@@ -1413,7 +1413,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
             subtitle: Text(
               '${difficultyData['name']} (+${difficultyData['exp']}XP, +${_getDifficultyGold(task.difficulty)}G)${task.isOverdue ? " (期限切れ)" : task.isDueToday ? " (今日)" : ""}',
               style: TextStyle(
-                color: task.isOverdue ? Colors.red : difficultyData['color'],
+                color: task.isOverdue ? Colors.red : (difficultyData['color'] as Color),
                 fontSize: 12,
                 fontWeight: FontWeight.w500,
               ),
