@@ -1141,18 +1141,18 @@ class _TaskScreenState extends State<TaskScreen> {
   }
 
   Future<void> _selectDueDate() async {
-    final DateTime? picked = await showDatePicker(
+    // シンプルな日付選択ダイアログを表示
+    showDialog(
       context: context,
-      initialDate: _selectedDueDate ?? DateTime.now(),
-      firstDate: DateTime.now(),
-      lastDate: DateTime.now().add(Duration(days: 365)),
-      locale: Locale('ja', 'JP'),
+      builder: (context) => _DatePickerDialog(
+        initialDate: _selectedDueDate,
+        onDateSelected: (date) {
+          setState(() {
+            _selectedDueDate = date;
+          });
+        },
+      ),
     );
-    if (picked != null && picked != _selectedDueDate) {
-      setState(() {
-        _selectedDueDate = picked;
-      });
-    }
   }
 
   int _getDifficultyGold(String difficulty) {
@@ -1202,6 +1202,97 @@ class _TaskScreenState extends State<TaskScreen> {
   void dispose() {
     _taskController.dispose();
     super.dispose();
+  }
+}
+
+// カスタム日付選択ダイアログ
+class _DatePickerDialog extends StatefulWidget {
+  final DateTime? initialDate;
+  final Function(DateTime?) onDateSelected;
+
+  _DatePickerDialog({required this.initialDate, required this.onDateSelected});
+
+  @override
+  _DatePickerDialogState createState() => _DatePickerDialogState();
+}
+
+class _DatePickerDialogState extends State<_DatePickerDialog> {
+  DateTime? selectedDate;
+
+  @override
+  void initState() {
+    super.initState();
+    selectedDate = widget.initialDate;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final today = DateTime.now();
+    final dates = List.generate(30, (index) {
+      return today.add(Duration(days: index));
+    });
+
+    return AlertDialog(
+      title: Text('📅 期限を選択'),
+      content: Container(
+        width: double.maxFinite,
+        height: 300,
+        child: ListView.builder(
+          itemCount: dates.length + 1,
+          itemBuilder: (context, index) {
+            if (index == 0) {
+              return ListTile(
+                leading: Icon(Icons.clear, color: Colors.red),
+                title: Text('期限なし'),
+                onTap: () {
+                  widget.onDateSelected(null);
+                  Navigator.pop(context);
+                },
+              );
+            }
+            
+            final date = dates[index - 1];
+            final isSelected = selectedDate != null && 
+                date.year == selectedDate!.year &&
+                date.month == selectedDate!.month &&
+                date.day == selectedDate!.day;
+            
+            return ListTile(
+              leading: Icon(
+                Icons.calendar_today,
+                color: isSelected ? Colors.blue : Colors.grey,
+              ),
+              title: Text(
+                '${date.month}/${date.day} (${_getWeekdayName(date.weekday)})',
+                style: TextStyle(
+                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                  color: isSelected ? Colors.blue : Colors.black,
+                ),
+              ),
+              subtitle: Text(
+                index == 1 ? '今日' : index == 2 ? '明日' : '${index - 1}日後',
+                style: TextStyle(fontSize: 12),
+              ),
+              onTap: () {
+                widget.onDateSelected(date);
+                Navigator.pop(context);
+              },
+            );
+          },
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text('キャンセル'),
+        ),
+      ],
+    );
+  }
+
+  String _getWeekdayName(int weekday) {
+    const weekdays = ['月', '火', '水', '木', '金', '土', '日'];
+    return weekdays[weekday - 1];
   }
 }
 
