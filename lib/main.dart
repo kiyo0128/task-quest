@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/foundation.dart';
 import 'dart:html' as html show window if (dart.library.html) 'dart:html';
+import 'package:table_calendar/table_calendar.dart';
 
 // プラットフォーム対応ストレージ
 class PlatformStorage {
@@ -491,7 +492,9 @@ class _MainScreenState extends State<MainScreen> {
         children: [
           CharacterScreen(),
           TaskScreen(),
+          CalendarScreen(),
           ShopScreen(),
+          AchievementScreen(),
         ],
       ),
       bottomNavigationBar: BottomNavigationBar(
@@ -503,6 +506,9 @@ class _MainScreenState extends State<MainScreen> {
         },
         type: BottomNavigationBarType.fixed,
         selectedItemColor: Colors.blue[600],
+        unselectedItemColor: Colors.grey[600],
+        selectedFontSize: 12,
+        unselectedFontSize: 10,
         items: [
           BottomNavigationBarItem(
             icon: Icon(Icons.person),
@@ -513,8 +519,16 @@ class _MainScreenState extends State<MainScreen> {
             label: 'タスク',
           ),
           BottomNavigationBarItem(
+            icon: Icon(Icons.calendar_today),
+            label: 'カレンダー',
+          ),
+          BottomNavigationBarItem(
             icon: Icon(Icons.store),
             label: 'ショップ',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.emoji_events),
+            label: '実績',
           ),
         ],
       ),
@@ -608,6 +622,13 @@ class CharacterScreen extends StatelessWidget {
                           children: [
                             _buildStatCard('レベル', '${character?.level}', Colors.orange),
                             _buildStatCard('経験値', '${character?.experience}', Colors.green),
+                            _buildStatCard('ゴールド', '${character?.gold}G', Colors.amber),
+                          ],
+                        ),
+                        SizedBox(height: 8),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
                             _buildStatCard('次のレベル', '${character?.expToNextLevel}', Colors.blue),
                           ],
                         ),
@@ -665,6 +686,7 @@ class CharacterScreen extends StatelessWidget {
                           children: [
                             _buildStatItem('完了タスク', '${gameProvider.completedTasksCount}', Icons.check_circle),
                             _buildStatItem('総タスク', '${gameProvider.totalTasksCount}', Icons.task_alt),
+                            _buildStatItem('実績', '${gameProvider.unlockedAchievementsCount}/${gameProvider.achievements.length}', Icons.emoji_events),
                           ],
                         ),
                       ],
@@ -798,6 +820,7 @@ class TaskScreen extends StatefulWidget {
 class _TaskScreenState extends State<TaskScreen> {
   final TextEditingController _taskController = TextEditingController();
   String _selectedDifficulty = 'normal';
+  DateTime? _selectedDueDate;
 
   final Map<String, Map<String, dynamic>> difficulties = {
     'easy': {'name': '簡単', 'exp': 10, 'color': Colors.green, 'icon': '🟢'},
@@ -924,6 +947,37 @@ class _TaskScreenState extends State<TaskScreen> {
                         }).toList(),
                       ),
                       SizedBox(height: 12),
+                      
+                      // 期限設定
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              '📅 期限: ${_selectedDueDate != null ? "${_selectedDueDate!.month}/${_selectedDueDate!.day}" : "なし"}',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.grey[700],
+                              ),
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: _selectDueDate,
+                            child: Text(_selectedDueDate != null ? '変更' : '設定'),
+                          ),
+                          if (_selectedDueDate != null)
+                            TextButton(
+                              onPressed: () {
+                                setState(() {
+                                  _selectedDueDate = null;
+                                });
+                              },
+                              child: Text('クリア', style: TextStyle(color: Colors.red)),
+                            ),
+                        ],
+                      ),
+                      SizedBox(height: 12),
+                      
                       SizedBox(
                         width: double.infinity,
                         child: ElevatedButton(
@@ -984,8 +1038,11 @@ class _TaskScreenState extends State<TaskScreen> {
                             return Container(
                               margin: EdgeInsets.only(bottom: 8),
                               decoration: BoxDecoration(
-                                color: Colors.white,
+                                color: task.isOverdue && !task.isCompleted ? Colors.red[50] : Colors.white,
                                 borderRadius: BorderRadius.circular(12),
+                                border: task.isOverdue && !task.isCompleted 
+                                    ? Border.all(color: Colors.red[300]!, width: 1)
+                                    : null,
                                 boxShadow: [
                                   BoxShadow(
                                     color: Colors.grey.withOpacity(0.1),
@@ -1015,16 +1072,32 @@ class _TaskScreenState extends State<TaskScreen> {
                                     fontSize: 16,
                                     fontWeight: FontWeight.w600,
                                     decoration: task.isCompleted ? TextDecoration.lineThrough : null,
-                                    color: task.isCompleted ? Colors.grey[500] : Colors.black,
+                                    color: task.isCompleted ? Colors.grey[500] : 
+                                           task.isOverdue ? Colors.red[700] : Colors.black,
                                   ),
                                 ),
-                                subtitle: Text(
-                                  '${difficultyData['name']} (+${difficultyData['exp']}XP)',
-                                  style: TextStyle(
-                                    color: difficultyData['color'],
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w500,
-                                  ),
+                                subtitle: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      '${difficultyData['name']} (+${difficultyData['exp']}XP, +${_getDifficultyGold(task.difficulty)}G)',
+                                      style: TextStyle(
+                                        color: difficultyData['color'],
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                    if (task.dueDate != null)
+                                      Text(
+                                        '📅 期限: ${task.dueDate!.month}/${task.dueDate!.day}${task.isOverdue ? " (期限切れ)" : task.isDueToday ? " (今日)" : ""}',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: task.isOverdue ? Colors.red : 
+                                                 task.isDueToday ? Colors.orange : Colors.grey[600],
+                                          fontWeight: task.isOverdue || task.isDueToday ? FontWeight.bold : FontWeight.normal,
+                                        ),
+                                      ),
+                                  ],
                                 ),
                                 trailing: task.isCompleted
                                     ? Icon(Icons.check_circle, color: Colors.green)
@@ -1051,9 +1124,12 @@ class _TaskScreenState extends State<TaskScreen> {
     if (title.isEmpty) return;
 
     final gameProvider = context.read<GameProvider>();
-    gameProvider.addTask(title, _selectedDifficulty);
+    gameProvider.addTask(title, _selectedDifficulty, dueDate: _selectedDueDate);
     
     _taskController.clear();
+    setState(() {
+      _selectedDueDate = null;
+    });
     
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -1062,6 +1138,26 @@ class _TaskScreenState extends State<TaskScreen> {
         duration: Duration(milliseconds: 1500),
       ),
     );
+  }
+
+  Future<void> _selectDueDate() async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDueDate ?? DateTime.now(),
+      firstDate: DateTime.now(),
+      lastDate: DateTime.now().add(Duration(days: 365)),
+      locale: Locale('ja', 'JP'),
+    );
+    if (picked != null && picked != _selectedDueDate) {
+      setState(() {
+        _selectedDueDate = picked;
+      });
+    }
+  }
+
+  int _getDifficultyGold(String difficulty) {
+    const goldMap = {'easy': 5, 'normal': 15, 'hard': 30};
+    return goldMap[difficulty] ?? 15;
   }
 
   void _completeTask(Task task) {
@@ -1109,61 +1205,853 @@ class _TaskScreenState extends State<TaskScreen> {
   }
 }
 
-// Shop Screen (Placeholder)
-class ShopScreen extends StatelessWidget {
+// Calendar Screen
+class CalendarScreen extends StatefulWidget {
+  @override
+  _CalendarScreenState createState() => _CalendarScreenState();
+}
+
+class _CalendarScreenState extends State<CalendarScreen> {
+  DateTime _focusedDay = DateTime.now();
+  DateTime? _selectedDay;
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('🏪 ショップ'),
-        centerTitle: true,
-        backgroundColor: Colors.blue[800],
-        foregroundColor: Colors.white,
-      ),
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Colors.blue[50]!, Colors.white],
+    return Consumer<GameProvider>(
+      builder: (context, gameProvider, child) {
+        return Scaffold(
+          appBar: AppBar(
+            title: Text('📅 カレンダー'),
+            centerTitle: true,
+            backgroundColor: Colors.blue[800],
+            foregroundColor: Colors.white,
           ),
+          body: Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Colors.blue[50]!, Colors.white],
+              ),
+            ),
+            child: Column(
+              children: [
+                // カレンダー
+                Container(
+                  margin: EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.grey.withOpacity(0.1),
+                        spreadRadius: 1,
+                        blurRadius: 8,
+                      ),
+                    ],
+                  ),
+                  child: TableCalendar<Task>(
+                    firstDay: DateTime.utc(2020, 1, 1),
+                    lastDay: DateTime.utc(2030, 12, 31),
+                    focusedDay: _focusedDay,
+                    selectedDayPredicate: (day) {
+                      return isSameDay(_selectedDay, day);
+                    },
+                    eventLoader: (day) {
+                      return gameProvider.getTasksForDate(day);
+                    },
+                    startingDayOfWeek: StartingDayOfWeek.sunday,
+                    calendarStyle: CalendarStyle(
+                      outsideDaysVisible: false,
+                      weekendTextStyle: TextStyle(color: Colors.red[600]),
+                      holidayTextStyle: TextStyle(color: Colors.red[600]),
+                      markerDecoration: BoxDecoration(
+                        color: Colors.blue[600],
+                        shape: BoxShape.circle,
+                      ),
+                      todayDecoration: BoxDecoration(
+                        color: Colors.orange[400],
+                        shape: BoxShape.circle,
+                      ),
+                      selectedDecoration: BoxDecoration(
+                        color: Colors.blue[600],
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    headerStyle: HeaderStyle(
+                      formatButtonVisible: false,
+                      titleCentered: true,
+                      titleTextStyle: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.blue[800],
+                      ),
+                    ),
+                    onDaySelected: (selectedDay, focusedDay) {
+                      setState(() {
+                        _selectedDay = selectedDay;
+                        _focusedDay = focusedDay;
+                      });
+                    },
+                    onPageChanged: (focusedDay) {
+                      _focusedDay = focusedDay;
+                    },
+                  ),
+                ),
+                
+                // 選択された日のタスク
+                Expanded(
+                  child: Container(
+                    margin: EdgeInsets.symmetric(horizontal: 16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _selectedDay != null 
+                              ? '📋 ${_selectedDay!.month}/${_selectedDay!.day}のタスク'
+                              : '📋 今日のタスク',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blue[800],
+                          ),
+                        ),
+                        SizedBox(height: 12),
+                        Expanded(
+                          child: _buildTaskList(gameProvider, _selectedDay ?? DateTime.now()),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildTaskList(GameProvider gameProvider, DateTime date) {
+    final tasks = gameProvider.getTasksForDate(date);
+    
+    if (tasks.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.event_available,
+              size: 64,
+              color: Colors.grey[400],
+            ),
+            SizedBox(height: 16),
+            Text(
+              'この日にタスクはありません',
+              style: TextStyle(
+                fontSize: 16,
+                color: Colors.grey[600],
+              ),
+            ),
+          ],
         ),
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                Icons.store,
-                size: 80,
-                color: Colors.blue[600],
-              ),
-              SizedBox(height: 24),
-              Text(
-                'ショップ',
-                style: TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.blue[800],
-                ),
-              ),
-              SizedBox(height: 16),
-              Text(
-                'アイテムショップは準備中です...\n今後のアップデートをお楽しみに！',
-                style: TextStyle(
-                  fontSize: 16,
-                  color: Colors.grey[600],
-                ),
-                textAlign: TextAlign.center,
+      );
+    }
+
+    return ListView.builder(
+      itemCount: tasks.length,
+      itemBuilder: (context, index) {
+        final task = tasks[index];
+        final difficulties = {
+          'easy': {'name': '簡単', 'exp': 10, 'color': Colors.green, 'icon': '🟢'},
+          'normal': {'name': '普通', 'exp': 25, 'color': Colors.orange, 'icon': '🟡'},
+          'hard': {'name': '難しい', 'exp': 50, 'color': Colors.red, 'icon': '🔴'},
+        };
+        final difficultyData = difficulties[task.difficulty]!;
+        
+        return Container(
+          margin: EdgeInsets.only(bottom: 8),
+          decoration: BoxDecoration(
+            color: task.isOverdue && !task.isCompleted ? Colors.red[50] : Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: task.isOverdue && !task.isCompleted 
+                ? Border.all(color: Colors.red[300]!, width: 1)
+                : null,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.grey.withOpacity(0.1),
+                spreadRadius: 1,
+                blurRadius: 4,
               ),
             ],
           ),
+          child: ListTile(
+            leading: Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: difficultyData['color'].withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Center(
+                child: Text(
+                  difficultyData['icon'],
+                  style: TextStyle(fontSize: 20),
+                ),
+              ),
+            ),
+            title: Text(
+              task.title,
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                decoration: task.isCompleted ? TextDecoration.lineThrough : null,
+                color: task.isCompleted ? Colors.grey[500] : 
+                       task.isOverdue ? Colors.red[700] : Colors.black,
+              ),
+            ),
+            subtitle: Text(
+              '${difficultyData['name']} (+${difficultyData['exp']}XP, +${_getDifficultyGold(task.difficulty)}G)${task.isOverdue ? " (期限切れ)" : task.isDueToday ? " (今日)" : ""}',
+              style: TextStyle(
+                color: task.isOverdue ? Colors.red : difficultyData['color'],
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            trailing: task.isCompleted
+                ? Icon(Icons.check_circle, color: Colors.green)
+                : IconButton(
+                    icon: Icon(Icons.check_circle_outline),
+                    onPressed: () => _completeTask(gameProvider, task),
+                  ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _completeTask(GameProvider gameProvider, Task task) {
+    gameProvider.completeTask(task);
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('タスク完了！'),
+        backgroundColor: Colors.green[600],
+        duration: Duration(milliseconds: 1500),
+      ),
+    );
+  }
+
+  int _getDifficultyGold(String difficulty) {
+    const goldMap = {'easy': 5, 'normal': 15, 'hard': 30};
+    return goldMap[difficulty] ?? 15;
+  }
+}
+
+// Shop Screen
+class ShopScreen extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<GameProvider>(
+      builder: (context, gameProvider, child) {
+        final character = gameProvider.character;
+        
+        return Scaffold(
+          appBar: AppBar(
+            title: Text('🏪 ショップ'),
+            centerTitle: true,
+            backgroundColor: Colors.blue[800],
+            foregroundColor: Colors.white,
+            actions: [
+              Container(
+                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.monetization_on, color: Colors.amber, size: 20),
+                    SizedBox(width: 4),
+                    Text(
+                      '${character?.gold ?? 0}G',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          body: Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Colors.blue[50]!, Colors.white],
+              ),
+            ),
+            child: Column(
+              children: [
+                // ヘッダー
+                Container(
+                  margin: EdgeInsets.all(16),
+                  padding: EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.grey.withOpacity(0.1),
+                        spreadRadius: 1,
+                        blurRadius: 8,
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    children: [
+                      Text(
+                        '🏪 アイテムショップ',
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.blue[800],
+                        ),
+                      ),
+                      SizedBox(height: 8),
+                      Text(
+                        'タスクを完了してゴールドを稼ぎ、\n便利なアイテムを購入しよう！',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Colors.grey[600],
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                  ),
+                ),
+                
+                // アイテムリスト
+                Expanded(
+                  child: ListView.builder(
+                    padding: EdgeInsets.symmetric(horizontal: 16),
+                    itemCount: gameProvider.shopItems.length,
+                    itemBuilder: (context, index) {
+                      final item = gameProvider.shopItems[index];
+                      final isPurchased = character?.purchasedItems.contains(item.id) ?? false;
+                      final canAfford = (character?.gold ?? 0) >= item.price;
+                      
+                      return Container(
+                        margin: EdgeInsets.only(bottom: 12),
+                        decoration: BoxDecoration(
+                          color: isPurchased ? Colors.green[50] : Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          border: isPurchased 
+                              ? Border.all(color: Colors.green[300]!, width: 1)
+                              : null,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.grey.withOpacity(0.1),
+                              spreadRadius: 1,
+                              blurRadius: 4,
+                            ),
+                          ],
+                        ),
+                        child: ListTile(
+                          contentPadding: EdgeInsets.all(16),
+                          leading: Container(
+                            width: 50,
+                            height: 50,
+                            decoration: BoxDecoration(
+                              color: _getTypeColor(item.type).withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Center(
+                              child: Text(
+                                item.icon,
+                                style: TextStyle(fontSize: 24),
+                              ),
+                            ),
+                          ),
+                          title: Text(
+                            item.name,
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: isPurchased ? Colors.green[700] : Colors.black,
+                            ),
+                          ),
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              SizedBox(height: 4),
+                              Text(
+                                item.description,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey[600],
+                                ),
+                              ),
+                              SizedBox(height: 8),
+                              Row(
+                                children: [
+                                  Container(
+                                    padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: _getTypeColor(item.type).withOpacity(0.1),
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: Text(
+                                      _getTypeName(item.type),
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        color: _getTypeColor(item.type),
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                  Spacer(),
+                                  Row(
+                                    children: [
+                                      Icon(Icons.monetization_on, 
+                                           color: Colors.amber, size: 16),
+                                      SizedBox(width: 2),
+                                      Text(
+                                        '${item.price}G',
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.bold,
+                                          color: canAfford ? Colors.amber[700] : Colors.red,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                          trailing: isPurchased
+                              ? Icon(Icons.check_circle, color: Colors.green, size: 32)
+                              : ElevatedButton(
+                                  onPressed: canAfford ? () => _purchaseItem(context, gameProvider, item) : null,
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: canAfford ? Colors.blue[600] : Colors.grey[300],
+                                    foregroundColor: Colors.white,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                  ),
+                                  child: Text(
+                                    canAfford ? '購入' : '不足',
+                                    style: TextStyle(fontSize: 12),
+                                  ),
+                                ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Color _getTypeColor(String type) {
+    switch (type) {
+      case 'weapon': return Colors.red;
+      case 'armor': return Colors.blue;
+      case 'accessory': return Colors.purple;
+      case 'consumable': return Colors.green;
+      default: return Colors.grey;
+    }
+  }
+
+  String _getTypeName(String type) {
+    switch (type) {
+      case 'weapon': return '武器';
+      case 'armor': return '防具';
+      case 'accessory': return '装飾品';
+      case 'consumable': return '消耗品';
+      default: return 'その他';
+    }
+  }
+
+  void _purchaseItem(BuildContext context, GameProvider gameProvider, ShopItem item) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('アイテム購入'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('${item.icon} ${item.name}'),
+            SizedBox(height: 8),
+            Text(
+              item.description,
+              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+            ),
+            SizedBox(height: 12),
+            Text('価格: ${item.price}G'),
+            Text('所持金: ${gameProvider.character?.gold ?? 0}G'),
+          ],
         ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('キャンセル'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final success = await gameProvider.purchaseItem(item);
+              Navigator.pop(context);
+              
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(success ? 'アイテムを購入しました！' : '購入に失敗しました'),
+                  backgroundColor: success ? Colors.green[600] : Colors.red[600],
+                  duration: Duration(milliseconds: 1500),
+                ),
+              );
+            },
+            child: Text('購入'),
+          ),
+        ],
       ),
     );
   }
 }
 
-// Task Model
+// Shop Item Model
+class ShopItem {
+  final String id;
+  final String name;
+  final String description;
+  final String icon;
+  final int price;
+  final String type; // 'weapon', 'armor', 'accessory', 'consumable'
+
+  ShopItem({
+    required this.id,
+    required this.name,
+    required this.description,
+    required this.icon,
+    required this.price,
+    required this.type,
+  });
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'name': name,
+      'description': description,
+      'icon': icon,
+      'price': price,
+      'type': type,
+    };
+  }
+
+  factory ShopItem.fromMap(Map<String, dynamic> map) {
+    return ShopItem(
+      id: map['id'] ?? '',
+      name: map['name'] ?? '',
+      description: map['description'] ?? '',
+      icon: map['icon'] ?? '',
+      price: map['price']?.toInt() ?? 0,
+      type: map['type'] ?? '',
+    );
+  }
+}
+
+// Achievement Model
+class Achievement {
+  final String id;
+  final String title;
+  final String description;
+  final String icon;
+  final bool isUnlocked;
+  final DateTime? unlockedAt;
+  final int goldReward;
+
+  Achievement({
+    required this.id,
+    required this.title,
+    required this.description,
+    required this.icon,
+    this.isUnlocked = false,
+    this.unlockedAt,
+    this.goldReward = 0,
+  });
+
+  Achievement copyWith({
+    String? id,
+    String? title,
+    String? description,
+    String? icon,
+    bool? isUnlocked,
+    DateTime? unlockedAt,
+    int? goldReward,
+  }) {
+    return Achievement(
+      id: id ?? this.id,
+      title: title ?? this.title,
+      description: description ?? this.description,
+      icon: icon ?? this.icon,
+      isUnlocked: isUnlocked ?? this.isUnlocked,
+      unlockedAt: unlockedAt ?? this.unlockedAt,
+      goldReward: goldReward ?? this.goldReward,
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'title': title,
+      'description': description,
+      'icon': icon,
+      'isUnlocked': isUnlocked,
+      'unlockedAt': unlockedAt?.toIso8601String(),
+      'goldReward': goldReward,
+    };
+  }
+
+  factory Achievement.fromMap(Map<String, dynamic> map) {
+    return Achievement(
+      id: map['id'] ?? '',
+      title: map['title'] ?? '',
+      description: map['description'] ?? '',
+      icon: map['icon'] ?? '',
+      isUnlocked: map['isUnlocked'] ?? false,
+      unlockedAt: map['unlockedAt'] != null ? DateTime.parse(map['unlockedAt']) : null,
+      goldReward: map['goldReward']?.toInt() ?? 0,
+    );
+  }
+
+  String toJson() => json.encode(toMap());
+  factory Achievement.fromJson(String source) => Achievement.fromMap(json.decode(source));
+}
+
+// Achievement Screen
+class AchievementScreen extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<GameProvider>(
+      builder: (context, gameProvider, child) {
+        final unlockedCount = gameProvider.unlockedAchievementsCount;
+        final totalCount = gameProvider.achievements.length;
+        
+        return Scaffold(
+          appBar: AppBar(
+            title: Text('🏆 実績'),
+            centerTitle: true,
+            backgroundColor: Colors.blue[800],
+            foregroundColor: Colors.white,
+          ),
+          body: Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Colors.blue[50]!, Colors.white],
+              ),
+            ),
+            child: Column(
+              children: [
+                // ヘッダー
+                Container(
+                  margin: EdgeInsets.all(16),
+                  padding: EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.grey.withOpacity(0.1),
+                        spreadRadius: 1,
+                        blurRadius: 8,
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    children: [
+                      Text(
+                        '🏆 実績システム',
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.blue[800],
+                        ),
+                      ),
+                      SizedBox(height: 8),
+                      Text(
+                        '様々な条件を達成して実績を解除しよう！\n実績を解除するとゴールドがもらえます。',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Colors.grey[600],
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      SizedBox(height: 16),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            '進捗: ',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.grey[700],
+                            ),
+                          ),
+                          Text(
+                            '$unlockedCount/$totalCount',
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.blue[600],
+                            ),
+                          ),
+                          SizedBox(width: 8),
+                          Text(
+                            '(${((unlockedCount / totalCount) * 100).toInt()}%)',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Colors.grey[600],
+                            ),
+                          ),
+                        ],
+                      ),
+                      SizedBox(height: 12),
+                      // 進捗バー
+                      Container(
+                        height: 8,
+                        decoration: BoxDecoration(
+                          color: Colors.grey[300],
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: FractionallySizedBox(
+                          alignment: Alignment.centerLeft,
+                          widthFactor: unlockedCount / totalCount,
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: Colors.blue[600],
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                
+                // 実績リスト
+                Expanded(
+                  child: ListView.builder(
+                    padding: EdgeInsets.symmetric(horizontal: 16),
+                    itemCount: gameProvider.achievements.length,
+                    itemBuilder: (context, index) {
+                      final achievement = gameProvider.achievements[index];
+                      
+                      return Container(
+                        margin: EdgeInsets.only(bottom: 12),
+                        decoration: BoxDecoration(
+                          color: achievement.isUnlocked ? Colors.amber[50] : Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          border: achievement.isUnlocked 
+                              ? Border.all(color: Colors.amber[300]!, width: 1)
+                              : null,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.grey.withOpacity(0.1),
+                              spreadRadius: 1,
+                              blurRadius: 4,
+                            ),
+                          ],
+                        ),
+                        child: ListTile(
+                          contentPadding: EdgeInsets.all(16),
+                          leading: Container(
+                            width: 50,
+                            height: 50,
+                            decoration: BoxDecoration(
+                              color: achievement.isUnlocked 
+                                  ? Colors.amber.withOpacity(0.2)
+                                  : Colors.grey.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Center(
+                              child: Text(
+                                achievement.isUnlocked ? achievement.icon : '🔒',
+                                style: TextStyle(fontSize: 24),
+                              ),
+                            ),
+                          ),
+                          title: Text(
+                            achievement.title,
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: achievement.isUnlocked ? Colors.amber[800] : Colors.grey[600],
+                            ),
+                          ),
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              SizedBox(height: 4),
+                              Text(
+                                achievement.description,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey[600],
+                                ),
+                              ),
+                              SizedBox(height: 8),
+                              Row(
+                                children: [
+                                  Icon(Icons.monetization_on, 
+                                       color: Colors.amber, size: 16),
+                                  SizedBox(width: 4),
+                                  Text(
+                                    '報酬: ${achievement.goldReward}G',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.amber[700],
+                                    ),
+                                  ),
+                                  Spacer(),
+                                  if (achievement.isUnlocked && achievement.unlockedAt != null)
+                                    Text(
+                                      '解除日: ${achievement.unlockedAt!.month}/${achievement.unlockedAt!.day}',
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        color: Colors.grey[500],
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ],
+                          ),
+                          trailing: achievement.isUnlocked
+                              ? Icon(Icons.check_circle, color: Colors.amber, size: 32)
+                              : Icon(Icons.lock, color: Colors.grey, size: 32),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+// Task Model (Extended)
 class Task {
   final String id;
   final String title;
@@ -1171,6 +2059,7 @@ class Task {
   final bool isCompleted;
   final DateTime createdAt;
   final DateTime? completedAt;
+  final DateTime? dueDate;
 
   Task({
     required this.id,
@@ -1179,15 +2068,29 @@ class Task {
     this.isCompleted = false,
     required this.createdAt,
     this.completedAt,
+    this.dueDate,
   });
 
-  factory Task.create(String title, String difficulty) {
+  factory Task.create(String title, String difficulty, {DateTime? dueDate}) {
     return Task(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
       title: title,
       difficulty: difficulty,
       createdAt: DateTime.now(),
+      dueDate: dueDate,
     );
+  }
+
+  bool get isOverdue {
+    if (dueDate == null || isCompleted) return false;
+    return DateTime.now().isAfter(dueDate!);
+  }
+
+  bool get isDueToday {
+    if (dueDate == null) return false;
+    final now = DateTime.now();
+    final due = dueDate!;
+    return now.year == due.year && now.month == due.month && now.day == due.day;
   }
 
   Task copyWith({
@@ -1197,6 +2100,7 @@ class Task {
     bool? isCompleted,
     DateTime? createdAt,
     DateTime? completedAt,
+    DateTime? dueDate,
   }) {
     return Task(
       id: id ?? this.id,
@@ -1205,6 +2109,7 @@ class Task {
       isCompleted: isCompleted ?? this.isCompleted,
       createdAt: createdAt ?? this.createdAt,
       completedAt: completedAt ?? this.completedAt,
+      dueDate: dueDate ?? this.dueDate,
     );
   }
 
@@ -1216,6 +2121,7 @@ class Task {
       'isCompleted': isCompleted,
       'createdAt': createdAt.toIso8601String(),
       'completedAt': completedAt?.toIso8601String(),
+      'dueDate': dueDate?.toIso8601String(),
     };
   }
 
@@ -1227,6 +2133,7 @@ class Task {
       isCompleted: map['isCompleted'] ?? false,
       createdAt: DateTime.parse(map['createdAt']),
       completedAt: map['completedAt'] != null ? DateTime.parse(map['completedAt']) : null,
+      dueDate: map['dueDate'] != null ? DateTime.parse(map['dueDate']) : null,
     );
   }
 
@@ -1241,6 +2148,8 @@ class Character {
   final String name;
   final int level;
   final int experience;
+  final int gold;
+  final List<String> purchasedItems;
   final DateTime createdAt;
 
   Character({
@@ -1249,6 +2158,8 @@ class Character {
     required this.name,
     this.level = 1,
     this.experience = 0,
+    this.gold = 100, // 初期ゴールド
+    this.purchasedItems = const [],
     required this.createdAt,
   });
 
@@ -1277,6 +2188,8 @@ class Character {
     String? name,
     int? level,
     int? experience,
+    int? gold,
+    List<String>? purchasedItems,
     DateTime? createdAt,
   }) {
     return Character(
@@ -1285,6 +2198,8 @@ class Character {
       name: name ?? this.name,
       level: level ?? this.level,
       experience: experience ?? this.experience,
+      gold: gold ?? this.gold,
+      purchasedItems: purchasedItems ?? this.purchasedItems,
       createdAt: createdAt ?? this.createdAt,
     );
   }
@@ -1296,6 +2211,8 @@ class Character {
       'name': name,
       'level': level,
       'experience': experience,
+      'gold': gold,
+      'purchasedItems': purchasedItems,
       'createdAt': createdAt.toIso8601String(),
     };
   }
@@ -1307,6 +2224,8 @@ class Character {
       name: map['name'] ?? '',
       level: map['level']?.toInt() ?? 1,
       experience: map['experience']?.toInt() ?? 0,
+      gold: map['gold']?.toInt() ?? 100,
+      purchasedItems: List<String>.from(map['purchasedItems'] ?? []),
       createdAt: DateTime.parse(map['createdAt']),
     );
   }
@@ -1319,21 +2238,143 @@ class Character {
 class GameProvider with ChangeNotifier {
   Character? _character;
   List<Task> _tasks = [];
+  List<Achievement> _achievements = [];
   bool _isLoading = false;
 
   Character? get character => _character;
   List<Task> get tasks => _tasks;
+  List<Achievement> get achievements => _achievements;
   bool get isLoading => _isLoading;
   bool get hasCharacter => _character != null;
 
   int get completedTasksCount => _tasks.where((task) => task.isCompleted).length;
   int get totalTasksCount => _tasks.length;
+  int get unlockedAchievementsCount => _achievements.where((a) => a.isUnlocked).length;
+
+  List<Task> get todayTasks {
+    final today = DateTime.now();
+    return _tasks.where((task) {
+      if (task.dueDate == null) return false;
+      final due = task.dueDate!;
+      return due.year == today.year && due.month == today.month && due.day == today.day;
+    }).toList();
+  }
+
+  List<Task> get overdueTasks => _tasks.where((task) => task.isOverdue).toList();
 
   final Map<String, int> _difficultyExp = {
     'easy': 10,
     'normal': 25,
     'hard': 50,
   };
+
+  final Map<String, int> _difficultyGold = {
+    'easy': 5,
+    'normal': 15,
+    'hard': 30,
+  };
+
+  // ショップアイテム
+  final List<ShopItem> _shopItems = [
+    ShopItem(
+      id: 'sword_basic',
+      name: '鉄の剣',
+      description: '基本的な戦士の武器\n攻撃力+5',
+      icon: '⚔️',
+      price: 50,
+      type: 'weapon',
+    ),
+    ShopItem(
+      id: 'staff_basic',
+      name: '魔法の杖',
+      description: '魔法使いの基本杖\n魔力+5',
+      icon: '🪄',
+      price: 50,
+      type: 'weapon',
+    ),
+    ShopItem(
+      id: 'dagger_basic',
+      name: '盗賊の短剣',
+      description: '素早い攻撃が可能\n敏捷性+5',
+      icon: '🗡️',
+      price: 50,
+      type: 'weapon',
+    ),
+    ShopItem(
+      id: 'shield_basic',
+      name: '木の盾',
+      description: '基本的な防具\n防御力+3',
+      icon: '🛡️',
+      price: 30,
+      type: 'armor',
+    ),
+    ShopItem(
+      id: 'potion_health',
+      name: '回復ポーション',
+      description: 'HPを回復する\n体力+10',
+      icon: '🧪',
+      price: 20,
+      type: 'consumable',
+    ),
+    ShopItem(
+      id: 'ring_exp',
+      name: '経験値の指輪',
+      description: '経験値獲得量+20%\n知恵+3',
+      icon: '💍',
+      price: 100,
+      type: 'accessory',
+    ),
+  ];
+
+  List<ShopItem> get shopItems => _shopItems;
+
+  // 初期アチーブメント
+  void _initializeAchievements() {
+    _achievements = [
+      Achievement(
+        id: 'first_task',
+        title: '初心者',
+        description: '最初のタスクを完了',
+        icon: '🌟',
+        goldReward: 10,
+      ),
+      Achievement(
+        id: 'level_5',
+        title: 'レベル5到達',
+        description: 'レベル5に到達',
+        icon: '🏆',
+        goldReward: 50,
+      ),
+      Achievement(
+        id: 'task_10',
+        title: 'タスクマスター',
+        description: '10個のタスクを完了',
+        icon: '📋',
+        goldReward: 30,
+      ),
+      Achievement(
+        id: 'week_streak',
+        title: '継続の力',
+        description: '7日連続でタスクを完了',
+        icon: '🔥',
+        goldReward: 100,
+      ),
+      Achievement(
+        id: 'hard_task_5',
+        title: '困難を乗り越えて',
+        description: '難易度ハードのタスクを5個完了',
+        icon: '💪',
+        goldReward: 75,
+      ),
+      Achievement(
+        id: 'first_purchase',
+        title: '初回購入',
+        description: '初めてアイテムを購入',
+        icon: '💰',
+        goldReward: 20,
+      ),
+    ];
+  }
 
   // 初期化
   Future<void> initialize() async {
@@ -1342,18 +2383,24 @@ class GameProvider with ChangeNotifier {
     notifyListeners();
 
     try {
+      // アチーブメント初期化
+      _initializeAchievements();
+      
       // プラットフォーム対応ストレージからデータを読み込み
       String? characterJson;
       List<String> tasksJson = [];
+      List<String> achievementsJson = [];
       
       try {
         print('📱 PlatformStorage からデータ読み込み開始...');
         
         characterJson = await PlatformStorage.getString('taskquest_character');
         tasksJson = await PlatformStorage.getStringList('taskquest_tasks');
+        achievementsJson = await PlatformStorage.getStringList('taskquest_achievements');
         
         print('📖 読み込み結果 - キャラクター: ${characterJson != null ? "あり" : "なし"}');
         print('📖 読み込み結果 - タスク: ${tasksJson.length}件');
+        print('📖 読み込み結果 - アチーブメント: ${achievementsJson.length}件');
       } catch (e) {
         print('⚠️ PlatformStorage エラー: $e');
       }
@@ -1384,8 +2431,25 @@ class GameProvider with ChangeNotifier {
         // 破損したデータをクリア
         await _clearAllData();
       }
+
+      // アチーブメント読み込み
+      if (achievementsJson.isNotEmpty) {
+        try {
+          final savedAchievements = achievementsJson.map((json) => Achievement.fromJson(json)).toList();
+          // 保存されたアチーブメントの状態を適用
+          for (var saved in savedAchievements) {
+            final index = _achievements.indexWhere((a) => a.id == saved.id);
+            if (index != -1) {
+              _achievements[index] = saved;
+            }
+          }
+          print('✅ アチーブメント読み込み成功: ${_achievements.where((a) => a.isUnlocked).length}/${_achievements.length}件解除済み');
+        } catch (e) {
+          print('❌ アチーブメントデータ解析エラー: $e');
+        }
+      }
       
-      print('🎯 初期化完了 - キャラクター: ${_character != null ? "あり" : "なし"}, タスク: ${_tasks.length}件');
+      print('🎯 初期化完了 - キャラクター: ${_character != null ? "あり" : "なし"}, タスク: ${_tasks.length}件, アチーブメント: ${unlockedAchievementsCount}/${_achievements.length}件');
       
     } catch (e) {
       print('❌ 初期化エラー: $e');
@@ -1418,11 +2482,11 @@ class GameProvider with ChangeNotifier {
   }
 
   // タスク追加
-  Future<void> addTask(String title, String difficulty) async {
-    print('➕ タスク追加: $title ($difficulty)');
+  Future<void> addTask(String title, String difficulty, {DateTime? dueDate}) async {
+    print('➕ タスク追加: $title ($difficulty) - 期限: ${dueDate?.toString() ?? "なし"}');
     
     try {
-      final task = Task.create(title, difficulty);
+      final task = Task.create(title, difficulty, dueDate: dueDate);
       _tasks.add(task);
       await _saveTasks();
       notifyListeners();
@@ -1449,8 +2513,16 @@ class GameProvider with ChangeNotifier {
         final expGained = _difficultyExp[task.difficulty] ?? 0;
         _gainExperience(expGained);
         
+        // ゴールド獲得
+        final goldGained = _difficultyGold[task.difficulty] ?? 0;
+        _gainGold(goldGained);
+        
+        // アチーブメントチェック
+        _checkAchievements();
+        
         await _saveTasks();
         await _saveCharacter();
+        await _saveAchievements();
         notifyListeners();
         print('✅ タスク完了処理完了');
       }
@@ -1502,6 +2574,105 @@ class GameProvider with ChangeNotifier {
     );
   }
 
+  // ゴールド獲得
+  void _gainGold(int gold) {
+    if (_character == null) return;
+    
+    print('💰 ゴールド獲得: +${gold}G');
+    
+    _character = _character!.copyWith(
+      gold: _character!.gold + gold,
+    );
+  }
+
+  // アチーブメントチェック
+  void _checkAchievements() {
+    if (_character == null) return;
+    
+    final completedTasks = _tasks.where((t) => t.isCompleted).toList();
+    final hardCompletedTasks = completedTasks.where((t) => t.difficulty == 'hard').length;
+    
+    for (int i = 0; i < _achievements.length; i++) {
+      if (_achievements[i].isUnlocked) continue;
+      
+      bool shouldUnlock = false;
+      
+      switch (_achievements[i].id) {
+        case 'first_task':
+          shouldUnlock = completedTasks.isNotEmpty;
+          break;
+        case 'level_5':
+          shouldUnlock = _character!.level >= 5;
+          break;
+        case 'task_10':
+          shouldUnlock = completedTasks.length >= 10;
+          break;
+        case 'hard_task_5':
+          shouldUnlock = hardCompletedTasks >= 5;
+          break;
+        case 'first_purchase':
+          shouldUnlock = _character!.purchasedItems.isNotEmpty;
+          break;
+        case 'week_streak':
+          // 簡単な実装：7日間で7つのタスクを完了
+          final recentTasks = completedTasks.where((t) {
+            final daysDiff = DateTime.now().difference(t.completedAt!).inDays;
+            return daysDiff <= 7;
+          });
+          shouldUnlock = recentTasks.length >= 7;
+          break;
+      }
+      
+      if (shouldUnlock) {
+        _achievements[i] = _achievements[i].copyWith(
+          isUnlocked: true,
+          unlockedAt: DateTime.now(),
+        );
+        
+        // 報酬ゴールド付与
+        _gainGold(_achievements[i].goldReward);
+        
+        print('🏆 アチーブメント解除: ${_achievements[i].title} (+${_achievements[i].goldReward}G)');
+      }
+    }
+  }
+
+  // ショップアイテム購入
+  Future<bool> purchaseItem(ShopItem item) async {
+    if (_character == null) return false;
+    if (_character!.gold < item.price) return false;
+    if (_character!.purchasedItems.contains(item.id)) return false;
+    
+    try {
+      _character = _character!.copyWith(
+        gold: _character!.gold - item.price,
+        purchasedItems: [..._character!.purchasedItems, item.id],
+      );
+      
+      // アチーブメントチェック
+      _checkAchievements();
+      
+      await _saveCharacter();
+      await _saveAchievements();
+      notifyListeners();
+      
+      print('🛒 アイテム購入: ${item.name} (-${item.price}G)');
+      return true;
+    } catch (e) {
+      print('❌ アイテム購入エラー: $e');
+      return false;
+    }
+  }
+
+  // 日付別タスク取得
+  List<Task> getTasksForDate(DateTime date) {
+    return _tasks.where((task) {
+      if (task.dueDate == null) return false;
+      final due = task.dueDate!;
+      return due.year == date.year && due.month == date.month && due.day == date.day;
+    }).toList();
+  }
+
   // データ保存
   Future<void> _saveCharacter() async {
     if (_character == null) {
@@ -1546,6 +2717,24 @@ class GameProvider with ChangeNotifier {
     }
   }
 
+  Future<void> _saveAchievements() async {
+    try {
+      final achievementsJson = _achievements.map((achievement) => achievement.toJson()).toList();
+      
+      // PlatformStorageに保存
+      try {
+        final success = await PlatformStorage.setStringList('taskquest_achievements', achievementsJson);
+        print('💾 PlatformStorage アチーブメント保存: ${success ? "成功" : "失敗"} - ${achievementsJson.length}件');
+      } catch (e) {
+        print('⚠️ PlatformStorage アチーブメント保存エラー: $e');
+      }
+      
+    } catch (e) {
+      print('❌ アチーブメント保存エラー: $e');
+      rethrow;
+    }
+  }
+
   // デバッグ用：データリセット機能
   Future<void> resetAllData() async {
     print('🔄 全データリセット開始...');
@@ -1555,6 +2744,7 @@ class GameProvider with ChangeNotifier {
       try {
         await PlatformStorage.remove('taskquest_character');
         await PlatformStorage.remove('taskquest_tasks');
+        await PlatformStorage.remove('taskquest_achievements');
         print('🗑️ PlatformStorage クリア完了');
       } catch (e) {
         print('⚠️ PlatformStorage クリアエラー: $e');
@@ -1562,6 +2752,7 @@ class GameProvider with ChangeNotifier {
       
       _character = null;
       _tasks = [];
+      _initializeAchievements(); // アチーブメントを初期状態に戻す
       notifyListeners();
       
       print('✅ 全データリセット完了');
