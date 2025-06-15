@@ -5,6 +5,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/foundation.dart';
 import 'dart:html' as html show window if (dart.library.html) 'dart:html';
 import 'package:table_calendar/table_calendar.dart';
+import 'package:circular_countdown_timer/circular_countdown_timer.dart';
+import 'dart:async';
+import 'dart:math';
 
 // プラットフォーム対応ストレージ
 class PlatformStorage {
@@ -484,6 +487,12 @@ class MainScreen extends StatefulWidget {
 class _MainScreenState extends State<MainScreen> {
   int _selectedIndex = 0;
 
+  void setSelectedIndex(int index) {
+    setState(() {
+      _selectedIndex = index;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -493,6 +502,8 @@ class _MainScreenState extends State<MainScreen> {
           CharacterScreen(),
           TaskScreen(),
           CalendarScreen(),
+          QuestScreen(),
+          PomodoroScreen(),
           ShopScreen(),
           AchievementScreen(),
         ],
@@ -500,15 +511,13 @@ class _MainScreenState extends State<MainScreen> {
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _selectedIndex,
         onTap: (index) {
-          setState(() {
-            _selectedIndex = index;
-          });
+          setSelectedIndex(index);
         },
         type: BottomNavigationBarType.fixed,
         selectedItemColor: Colors.blue[600],
         unselectedItemColor: Colors.grey[600],
-        selectedFontSize: 12,
-        unselectedFontSize: 10,
+        selectedFontSize: 10,
+        unselectedFontSize: 8,
         items: [
           BottomNavigationBarItem(
             icon: Icon(Icons.person),
@@ -521,6 +530,14 @@ class _MainScreenState extends State<MainScreen> {
           BottomNavigationBarItem(
             icon: Icon(Icons.calendar_today),
             label: 'カレンダー',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.explore),
+            label: 'クエスト',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.timer),
+            label: 'ポモドーロ',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.store),
@@ -687,6 +704,15 @@ class CharacterScreen extends StatelessWidget {
                             _buildStatItem('完了タスク', '${gameProvider.completedTasksCount}', Icons.check_circle),
                             _buildStatItem('総タスク', '${gameProvider.totalTasksCount}', Icons.task_alt),
                             _buildStatItem('実績', '${gameProvider.unlockedAchievementsCount}/${gameProvider.achievements.length}', Icons.emoji_events),
+                          ],
+                        ),
+                        SizedBox(height: 12),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                          children: [
+                            _buildStatItem('完了クエスト', '${gameProvider.quests.where((q) => q.isCompleted).length}', Icons.explore),
+                            _buildStatItem('ポモドーロ', '${gameProvider.pomodoroSessions.where((s) => s.isCompleted).length}', Icons.timer),
+                            _buildStatItem('ボス討伐', '${gameProvider.quests.where((q) => q.isCompleted && q.boss != null).length}', Icons.shield),
                           ],
                         ),
                       ],
@@ -1099,12 +1125,23 @@ class _TaskScreenState extends State<TaskScreen> {
                                       ),
                                   ],
                                 ),
-                                trailing: task.isCompleted
-                                    ? Icon(Icons.check_circle, color: Colors.green)
-                                    : IconButton(
-                                        icon: Icon(Icons.check_circle_outline),
-                                        onPressed: () => _completeTask(task),
-                                      ),
+                                            trailing: task.isCompleted
+                ? Icon(Icons.check_circle, color: Colors.green)
+                : Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: Icon(Icons.timer, color: Colors.orange),
+                        onPressed: () => _startPomodoroForTask(task),
+                        tooltip: 'ポモドーロ開始',
+                      ),
+                      IconButton(
+                        icon: Icon(Icons.check_circle_outline),
+                        onPressed: () => _completeTask(task),
+                        tooltip: 'タスク完了',
+                      ),
+                    ],
+                  ),
                                 onLongPress: () => _deleteTask(task),
                               ),
                             );
@@ -1192,6 +1229,33 @@ class _TaskScreenState extends State<TaskScreen> {
               Navigator.pop(context);
             },
             child: Text('削除', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _startPomodoroForTask(Task task) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('🍅 ポモドーロ開始'),
+        content: Text('「${task.title}」のポモドーロタイマーを開始しますか？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('キャンセル'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              // ポモドーロタブに移動
+              final mainScreenState = context.findAncestorStateOfType<_MainScreenState>();
+              if (mainScreenState != null) {
+                mainScreenState.setSelectedIndex(4); // ポモドーロタブのインデックス
+              }
+            },
+            child: Text('開始'),
           ),
         ],
       ),
@@ -2330,11 +2394,15 @@ class GameProvider with ChangeNotifier {
   Character? _character;
   List<Task> _tasks = [];
   List<Achievement> _achievements = [];
+  List<Quest> _quests = [];
+  List<PomodoroSession> _pomodoroSessions = [];
   bool _isLoading = false;
 
   Character? get character => _character;
   List<Task> get tasks => _tasks;
   List<Achievement> get achievements => _achievements;
+  List<Quest> get quests => _quests;
+  List<PomodoroSession> get pomodoroSessions => _pomodoroSessions;
   bool get isLoading => _isLoading;
   bool get hasCharacter => _character != null;
 
@@ -2419,6 +2487,42 @@ class GameProvider with ChangeNotifier {
 
   List<ShopItem> get shopItems => _shopItems;
 
+  // 初期クエスト設定
+  void _initializeQuests() {
+    if (_quests.isEmpty) {
+      _quests = [
+        Quest.create(
+          'スライム討伐',
+          '森に出現したスライムを倒してください',
+          'easy',
+          boss: Boss.create('スライム', '🟢', 1),
+        ),
+        Quest.create(
+          'ゴブリン退治',
+          '村を襲うゴブリンを退治してください',
+          'normal',
+          boss: Boss.create('ゴブリン', '👹', 2),
+        ),
+        Quest.create(
+          'ドラゴン討伐',
+          '伝説のドラゴンを討伐してください',
+          'hard',
+          boss: Boss.create('ドラゴン', '🐉', 5),
+        ),
+        Quest.create(
+          '古代遺跡の探索',
+          '古代遺跡を探索して宝物を見つけてください',
+          'normal',
+        ),
+        Quest.create(
+          '薬草採集',
+          '山で薬草を10個採集してください',
+          'easy',
+        ),
+      ];
+    }
+  }
+
   // 初期アチーブメント
   void _initializeAchievements() {
     _achievements = [
@@ -2464,6 +2568,27 @@ class GameProvider with ChangeNotifier {
         icon: '💰',
         goldReward: 20,
       ),
+      Achievement(
+        id: 'first_quest',
+        title: '冒険者',
+        description: '初めてクエストを完了',
+        icon: '🗺️',
+        goldReward: 25,
+      ),
+      Achievement(
+        id: 'boss_slayer',
+        title: 'ボススレイヤー',
+        description: 'ボスを倒してクエストを完了',
+        icon: '⚔️',
+        goldReward: 50,
+      ),
+      Achievement(
+        id: 'pomodoro_master',
+        title: 'ポモドーロマスター',
+        description: 'ポモドーロセッションを10回完了',
+        icon: '🍅',
+        goldReward: 30,
+      ),
     ];
   }
 
@@ -2477,10 +2602,15 @@ class GameProvider with ChangeNotifier {
       // アチーブメント初期化
       _initializeAchievements();
       
+      // クエスト初期化
+      _initializeQuests();
+      
       // プラットフォーム対応ストレージからデータを読み込み
       String? characterJson;
       List<String> tasksJson = [];
       List<String> achievementsJson = [];
+      List<String> questsJson = [];
+      List<String> pomodoroJson = [];
       
       try {
         print('📱 PlatformStorage からデータ読み込み開始...');
@@ -2488,10 +2618,14 @@ class GameProvider with ChangeNotifier {
         characterJson = await PlatformStorage.getString('taskquest_character');
         tasksJson = await PlatformStorage.getStringList('taskquest_tasks');
         achievementsJson = await PlatformStorage.getStringList('taskquest_achievements');
+        questsJson = await PlatformStorage.getStringList('taskquest_quests');
+        pomodoroJson = await PlatformStorage.getStringList('taskquest_pomodoro');
         
         print('📖 読み込み結果 - キャラクター: ${characterJson != null ? "あり" : "なし"}');
         print('📖 読み込み結果 - タスク: ${tasksJson.length}件');
         print('📖 読み込み結果 - アチーブメント: ${achievementsJson.length}件');
+        print('📖 読み込み結果 - クエスト: ${questsJson.length}件');
+        print('📖 読み込み結果 - ポモドーロ: ${pomodoroJson.length}件');
       } catch (e) {
         print('⚠️ PlatformStorage エラー: $e');
       }
@@ -2539,8 +2673,38 @@ class GameProvider with ChangeNotifier {
           print('❌ アチーブメントデータ解析エラー: $e');
         }
       }
+
+      // クエスト読み込み
+      if (questsJson.isNotEmpty) {
+        try {
+          final savedQuests = questsJson.map((json) => Quest.fromJson(json)).toList();
+          // 保存されたクエストの状態を適用
+          for (var saved in savedQuests) {
+            final index = _quests.indexWhere((q) => q.id == saved.id);
+            if (index != -1) {
+              _quests[index] = saved;
+            } else {
+              _quests.add(saved);
+            }
+          }
+          print('✅ クエスト読み込み成功: ${_quests.where((q) => q.isCompleted).length}/${_quests.length}件完了済み');
+        } catch (e) {
+          print('❌ クエストデータ解析エラー: $e');
+        }
+      }
+
+      // ポモドーロセッション読み込み
+      if (pomodoroJson.isNotEmpty) {
+        try {
+          _pomodoroSessions = pomodoroJson.map((json) => PomodoroSession.fromJson(json)).toList();
+          print('✅ ポモドーロセッション読み込み成功: ${_pomodoroSessions.length}件');
+        } catch (e) {
+          print('❌ ポモドーロデータ解析エラー: $e');
+          _pomodoroSessions = [];
+        }
+      }
       
-      print('🎯 初期化完了 - キャラクター: ${_character != null ? "あり" : "なし"}, タスク: ${_tasks.length}件, アチーブメント: ${unlockedAchievementsCount}/${_achievements.length}件');
+      print('🎯 初期化完了 - キャラクター: ${_character != null ? "あり" : "なし"}, タスク: ${_tasks.length}件, アチーブメント: ${unlockedAchievementsCount}/${_achievements.length}件, クエスト: ${_quests.length}件, ポモドーロ: ${_pomodoroSessions.length}件');
       
     } catch (e) {
       print('❌ 初期化エラー: $e');
@@ -2682,6 +2846,9 @@ class GameProvider with ChangeNotifier {
     
     final completedTasks = _tasks.where((t) => t.isCompleted).toList();
     final hardCompletedTasks = completedTasks.where((t) => t.difficulty == 'hard').length;
+    final completedQuests = _quests.where((q) => q.isCompleted).toList();
+    final completedBossQuests = completedQuests.where((q) => q.boss != null).length;
+    final completedPomodoroSessions = _pomodoroSessions.where((s) => s.isCompleted).length;
     
     for (int i = 0; i < _achievements.length; i++) {
       if (_achievements[i].isUnlocked) continue;
@@ -2703,6 +2870,15 @@ class GameProvider with ChangeNotifier {
           break;
         case 'first_purchase':
           shouldUnlock = _character!.purchasedItems.isNotEmpty;
+          break;
+        case 'first_quest':
+          shouldUnlock = completedQuests.isNotEmpty;
+          break;
+        case 'boss_slayer':
+          shouldUnlock = completedBossQuests > 0;
+          break;
+        case 'pomodoro_master':
+          shouldUnlock = completedPomodoroSessions >= 10;
           break;
         case 'week_streak':
           // 簡単な実装：7日間で7つのタスクを完了
@@ -2762,6 +2938,111 @@ class GameProvider with ChangeNotifier {
       final due = task.dueDate!;
       return due.year == date.year && due.month == date.month && due.day == date.day;
     }).toList();
+  }
+
+  // クエスト完了
+  Future<void> completeQuest(Quest quest) async {
+    print('🏆 クエスト完了: ${quest.title}');
+    
+    try {
+      final index = _quests.indexWhere((q) => q.id == quest.id);
+      if (index != -1) {
+        _quests[index] = quest.copyWith(
+          isCompleted: true,
+          completedAt: DateTime.now(),
+        );
+        
+        // 報酬獲得
+        _gainExperience(quest.expReward);
+        _gainGold(quest.goldReward);
+        
+        await _saveQuests();
+        await _saveCharacter();
+        
+        // アチーブメントチェック（保存後に実行）
+        _checkAchievements();
+        await _saveAchievements();
+        notifyListeners();
+        print('✅ クエスト完了処理完了');
+      }
+    } catch (e) {
+      print('❌ クエスト完了エラー: $e');
+      rethrow;
+    }
+  }
+
+  // ボス戦闘
+  Future<bool> fightBoss(Quest quest, String action) async {
+    if (quest.boss == null || _character == null) return false;
+    
+    final boss = quest.boss!;
+    final character = _character!;
+    final random = Random();
+    
+    int damage = 0;
+    
+    switch (action) {
+      case '攻撃':
+        damage = (character.level * 10) + random.nextInt(20);
+        break;
+      case '強攻撃':
+        damage = (character.level * 15) + random.nextInt(30);
+        break;
+      case '魔法攻撃':
+        damage = (character.level * 12) + random.nextInt(25);
+        break;
+      default:
+        damage = character.level * 8;
+    }
+    
+    // ボスにダメージを与える
+    final newHp = (boss.currentHp - damage).clamp(0, boss.maxHp);
+    final updatedBoss = boss.copyWith(
+      currentHp: newHp,
+      isDefeated: newHp <= 0,
+    );
+    
+    // クエストを更新
+    final index = _quests.indexWhere((q) => q.id == quest.id);
+    if (index != -1) {
+      _quests[index] = quest.copyWith(boss: updatedBoss);
+      await _saveQuests();
+      notifyListeners();
+    }
+    
+    print('⚔️ ボス戦闘: ${boss.name}に${damage}ダメージ (残りHP: ${newHp}/${boss.maxHp})');
+    
+    return updatedBoss.isDefeated;
+  }
+
+  // ポモドーロセッション開始
+  Future<void> startPomodoroSession({String? taskId}) async {
+    final session = PomodoroSession.create(taskId: taskId);
+    _pomodoroSessions.add(session);
+    await _savePomodoroSessions();
+    notifyListeners();
+    print('🍅 ポモドーロセッション開始: ${session.id}');
+  }
+
+  // ポモドーロセッション完了
+  Future<void> completePomodoroSession(String sessionId) async {
+    final index = _pomodoroSessions.indexWhere((s) => s.id == sessionId);
+    if (index != -1) {
+      _pomodoroSessions[index] = _pomodoroSessions[index].copyWith(
+        isCompleted: true,
+        endTime: DateTime.now(),
+        completedCycles: _pomodoroSessions[index].completedCycles + 1,
+      );
+      
+      // ポモドーロ完了報酬
+      _gainExperience(15);
+      _gainGold(5);
+      
+      await _savePomodoroSessions();
+      await _saveCharacter();
+      notifyListeners();
+      print('✅ ポモドーロセッション完了: $sessionId');
+    }
   }
 
   // データ保存
@@ -2826,6 +3107,42 @@ class GameProvider with ChangeNotifier {
     }
   }
 
+  Future<void> _saveQuests() async {
+    try {
+      final questsJson = _quests.map((quest) => quest.toJson()).toList();
+      
+      // PlatformStorageに保存
+      try {
+        final success = await PlatformStorage.setStringList('taskquest_quests', questsJson);
+        print('💾 PlatformStorage クエスト保存: ${success ? "成功" : "失敗"} - ${questsJson.length}件');
+      } catch (e) {
+        print('⚠️ PlatformStorage クエスト保存エラー: $e');
+      }
+      
+    } catch (e) {
+      print('❌ クエスト保存エラー: $e');
+      rethrow;
+    }
+  }
+
+  Future<void> _savePomodoroSessions() async {
+    try {
+      final pomodoroJson = _pomodoroSessions.map((session) => session.toJson()).toList();
+      
+      // PlatformStorageに保存
+      try {
+        final success = await PlatformStorage.setStringList('taskquest_pomodoro', pomodoroJson);
+        print('💾 PlatformStorage ポモドーロ保存: ${success ? "成功" : "失敗"} - ${pomodoroJson.length}件');
+      } catch (e) {
+        print('⚠️ PlatformStorage ポモドーロ保存エラー: $e');
+      }
+      
+    } catch (e) {
+      print('❌ ポモドーロ保存エラー: $e');
+      rethrow;
+    }
+  }
+
   // デバッグ用：データリセット機能
   Future<void> resetAllData() async {
     print('🔄 全データリセット開始...');
@@ -2836,6 +3153,8 @@ class GameProvider with ChangeNotifier {
         await PlatformStorage.remove('taskquest_character');
         await PlatformStorage.remove('taskquest_tasks');
         await PlatformStorage.remove('taskquest_achievements');
+        await PlatformStorage.remove('taskquest_quests');
+        await PlatformStorage.remove('taskquest_pomodoro');
         print('🗑️ PlatformStorage クリア完了');
       } catch (e) {
         print('⚠️ PlatformStorage クリアエラー: $e');
@@ -2843,7 +3162,9 @@ class GameProvider with ChangeNotifier {
       
       _character = null;
       _tasks = [];
+      _pomodoroSessions = [];
       _initializeAchievements(); // アチーブメントを初期状態に戻す
+      _initializeQuests(); // クエストを初期状態に戻す
       notifyListeners();
       
       print('✅ 全データリセット完了');
@@ -2854,6 +3175,1112 @@ class GameProvider with ChangeNotifier {
 
   Future<void> _clearAllData() async {
     await resetAllData();
+  }
+}
+
+// Quest System Models
+class Quest {
+  final String id;
+  final String title;
+  final String description;
+  final String difficulty;
+  final int expReward;
+  final int goldReward;
+  final String icon;
+  final List<String> requirements;
+  final bool isCompleted;
+  final DateTime? completedAt;
+  final DateTime createdAt;
+  final Boss? boss; // ボス戦があるクエスト
+
+  Quest({
+    required this.id,
+    required this.title,
+    required this.description,
+    required this.difficulty,
+    required this.expReward,
+    required this.goldReward,
+    required this.icon,
+    this.requirements = const [],
+    this.isCompleted = false,
+    this.completedAt,
+    required this.createdAt,
+    this.boss,
+  });
+
+  factory Quest.create(String title, String description, String difficulty, {Boss? boss}) {
+    final expRewards = {'easy': 50, 'normal': 100, 'hard': 200};
+    final goldRewards = {'easy': 25, 'normal': 50, 'hard': 100};
+    final icons = {'easy': '📜', 'normal': '⚔️', 'hard': '🏆'};
+    
+    return Quest(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      title: title,
+      description: description,
+      difficulty: difficulty,
+      expReward: expRewards[difficulty] ?? 100,
+      goldReward: goldRewards[difficulty] ?? 50,
+      icon: icons[difficulty] ?? '📜',
+      createdAt: DateTime.now(),
+      boss: boss,
+    );
+  }
+
+  Quest copyWith({
+    String? id,
+    String? title,
+    String? description,
+    String? difficulty,
+    int? expReward,
+    int? goldReward,
+    String? icon,
+    List<String>? requirements,
+    bool? isCompleted,
+    DateTime? completedAt,
+    DateTime? createdAt,
+    Boss? boss,
+  }) {
+    return Quest(
+      id: id ?? this.id,
+      title: title ?? this.title,
+      description: description ?? this.description,
+      difficulty: difficulty ?? this.difficulty,
+      expReward: expReward ?? this.expReward,
+      goldReward: goldReward ?? this.goldReward,
+      icon: icon ?? this.icon,
+      requirements: requirements ?? this.requirements,
+      isCompleted: isCompleted ?? this.isCompleted,
+      completedAt: completedAt ?? this.completedAt,
+      createdAt: createdAt ?? this.createdAt,
+      boss: boss ?? this.boss,
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'title': title,
+      'description': description,
+      'difficulty': difficulty,
+      'expReward': expReward,
+      'goldReward': goldReward,
+      'icon': icon,
+      'requirements': requirements,
+      'isCompleted': isCompleted,
+      'completedAt': completedAt?.toIso8601String(),
+      'createdAt': createdAt.toIso8601String(),
+      'boss': boss?.toMap(),
+    };
+  }
+
+  factory Quest.fromMap(Map<String, dynamic> map) {
+    return Quest(
+      id: map['id'] ?? '',
+      title: map['title'] ?? '',
+      description: map['description'] ?? '',
+      difficulty: map['difficulty'] ?? 'normal',
+      expReward: map['expReward']?.toInt() ?? 100,
+      goldReward: map['goldReward']?.toInt() ?? 50,
+      icon: map['icon'] ?? '📜',
+      requirements: List<String>.from(map['requirements'] ?? []),
+      isCompleted: map['isCompleted'] ?? false,
+      completedAt: map['completedAt'] != null ? DateTime.parse(map['completedAt']) : null,
+      createdAt: DateTime.parse(map['createdAt']),
+      boss: map['boss'] != null ? Boss.fromMap(map['boss']) : null,
+    );
+  }
+
+  String toJson() => json.encode(toMap());
+  factory Quest.fromJson(String source) => Quest.fromMap(json.decode(source));
+}
+
+// Boss Model
+class Boss {
+  final String id;
+  final String name;
+  final String icon;
+  final int maxHp;
+  final int currentHp;
+  final int attack;
+  final int defense;
+  final List<String> skills;
+  final bool isDefeated;
+
+  Boss({
+    required this.id,
+    required this.name,
+    required this.icon,
+    required this.maxHp,
+    required this.currentHp,
+    required this.attack,
+    required this.defense,
+    this.skills = const [],
+    this.isDefeated = false,
+  });
+
+  factory Boss.create(String name, String icon, int level) {
+    final hp = 100 + (level * 50);
+    return Boss(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      name: name,
+      icon: icon,
+      maxHp: hp,
+      currentHp: hp,
+      attack: 10 + (level * 5),
+      defense: 5 + (level * 2),
+      skills: ['通常攻撃', '強攻撃', '防御'],
+    );
+  }
+
+  Boss copyWith({
+    String? id,
+    String? name,
+    String? icon,
+    int? maxHp,
+    int? currentHp,
+    int? attack,
+    int? defense,
+    List<String>? skills,
+    bool? isDefeated,
+  }) {
+    return Boss(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      icon: icon ?? this.icon,
+      maxHp: maxHp ?? this.maxHp,
+      currentHp: currentHp ?? this.currentHp,
+      attack: attack ?? this.attack,
+      defense: defense ?? this.defense,
+      skills: skills ?? this.skills,
+      isDefeated: isDefeated ?? this.isDefeated,
+    );
+  }
+
+  double get hpPercentage => currentHp / maxHp;
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'name': name,
+      'icon': icon,
+      'maxHp': maxHp,
+      'currentHp': currentHp,
+      'attack': attack,
+      'defense': defense,
+      'skills': skills,
+      'isDefeated': isDefeated,
+    };
+  }
+
+  factory Boss.fromMap(Map<String, dynamic> map) {
+    return Boss(
+      id: map['id'] ?? '',
+      name: map['name'] ?? '',
+      icon: map['icon'] ?? '👹',
+      maxHp: map['maxHp']?.toInt() ?? 100,
+      currentHp: map['currentHp']?.toInt() ?? 100,
+      attack: map['attack']?.toInt() ?? 10,
+      defense: map['defense']?.toInt() ?? 5,
+      skills: List<String>.from(map['skills'] ?? []),
+      isDefeated: map['isDefeated'] ?? false,
+    );
+  }
+
+  String toJson() => json.encode(toMap());
+  factory Boss.fromJson(String source) => Boss.fromMap(json.decode(source));
+}
+
+// Pomodoro Session Model
+class PomodoroSession {
+  final String id;
+  final int workMinutes;
+  final int breakMinutes;
+  final int completedCycles;
+  final DateTime startTime;
+  final DateTime? endTime;
+  final bool isCompleted;
+  final String? taskId; // 関連するタスクID
+
+  PomodoroSession({
+    required this.id,
+    this.workMinutes = 25,
+    this.breakMinutes = 5,
+    this.completedCycles = 0,
+    required this.startTime,
+    this.endTime,
+    this.isCompleted = false,
+    this.taskId,
+  });
+
+  factory PomodoroSession.create({String? taskId}) {
+    return PomodoroSession(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      startTime: DateTime.now(),
+      taskId: taskId,
+    );
+  }
+
+  PomodoroSession copyWith({
+    String? id,
+    int? workMinutes,
+    int? breakMinutes,
+    int? completedCycles,
+    DateTime? startTime,
+    DateTime? endTime,
+    bool? isCompleted,
+    String? taskId,
+  }) {
+    return PomodoroSession(
+      id: id ?? this.id,
+      workMinutes: workMinutes ?? this.workMinutes,
+      breakMinutes: breakMinutes ?? this.breakMinutes,
+      completedCycles: completedCycles ?? this.completedCycles,
+      startTime: startTime ?? this.startTime,
+      endTime: endTime ?? this.endTime,
+      isCompleted: isCompleted ?? this.isCompleted,
+      taskId: taskId ?? this.taskId,
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'workMinutes': workMinutes,
+      'breakMinutes': breakMinutes,
+      'completedCycles': completedCycles,
+      'startTime': startTime.toIso8601String(),
+      'endTime': endTime?.toIso8601String(),
+      'isCompleted': isCompleted,
+      'taskId': taskId,
+    };
+  }
+
+  factory PomodoroSession.fromMap(Map<String, dynamic> map) {
+    return PomodoroSession(
+      id: map['id'] ?? '',
+      workMinutes: map['workMinutes']?.toInt() ?? 25,
+      breakMinutes: map['breakMinutes']?.toInt() ?? 5,
+      completedCycles: map['completedCycles']?.toInt() ?? 0,
+      startTime: DateTime.parse(map['startTime']),
+      endTime: map['endTime'] != null ? DateTime.parse(map['endTime']) : null,
+      isCompleted: map['isCompleted'] ?? false,
+      taskId: map['taskId'],
+    );
+  }
+
+  String toJson() => json.encode(toMap());
+  factory PomodoroSession.fromJson(String source) => PomodoroSession.fromMap(json.decode(source));
+}
+
+// Quest Screen
+class QuestScreen extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<GameProvider>(
+      builder: (context, gameProvider, child) {
+        return Scaffold(
+          appBar: AppBar(
+            title: Text('🗺️ クエスト'),
+            centerTitle: true,
+            backgroundColor: Colors.blue[800],
+            foregroundColor: Colors.white,
+          ),
+          body: Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Colors.blue[50]!, Colors.white],
+              ),
+            ),
+            child: Column(
+              children: [
+                // ヘッダー
+                Container(
+                  margin: EdgeInsets.all(16),
+                  padding: EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.grey.withOpacity(0.1),
+                        spreadRadius: 1,
+                        blurRadius: 8,
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    children: [
+                      Text(
+                        '⚔️ クエストボード',
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.blue[800],
+                        ),
+                      ),
+                      SizedBox(height: 8),
+                      Text(
+                        'クエストを完了して経験値とゴールドを獲得しよう！\nボス戦があるクエストは戦闘が必要です。',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Colors.grey[600],
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                  ),
+                ),
+                
+                // クエストリスト
+                Expanded(
+                  child: ListView.builder(
+                    padding: EdgeInsets.symmetric(horizontal: 16),
+                    itemCount: gameProvider.quests.length,
+                    itemBuilder: (context, index) {
+                      final quest = gameProvider.quests[index];
+                      return _buildQuestCard(context, quest, gameProvider);
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildQuestCard(BuildContext context, Quest quest, GameProvider gameProvider) {
+    final difficulties = {
+      'easy': {'name': '簡単', 'color': Colors.green},
+      'normal': {'name': '普通', 'color': Colors.orange},
+      'hard': {'name': '難しい', 'color': Colors.red},
+    };
+    final difficultyData = difficulties[quest.difficulty] ?? difficulties['normal']!;
+
+    return Container(
+      margin: EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: quest.isCompleted 
+            ? Border.all(color: Colors.green, width: 2)
+            : null,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withOpacity(0.1),
+            spreadRadius: 1,
+            blurRadius: 8,
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text(
+                  quest.icon,
+                  style: TextStyle(fontSize: 24),
+                ),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        quest.title,
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: quest.isCompleted ? Colors.green[700] : Colors.blue[800],
+                        ),
+                      ),
+                      SizedBox(height: 4),
+                                              Container(
+                          padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: (difficultyData['color'] as Color).withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            difficultyData['name'] as String,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: difficultyData['color'] as Color,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                if (quest.isCompleted)
+                  Icon(Icons.check_circle, color: Colors.green, size: 32),
+              ],
+            ),
+            SizedBox(height: 12),
+            Text(
+              quest.description,
+              style: TextStyle(
+                fontSize: 14,
+                color: Colors.grey[700],
+              ),
+            ),
+            SizedBox(height: 12),
+            Row(
+              children: [
+                Icon(Icons.star, color: Colors.amber, size: 16),
+                SizedBox(width: 4),
+                Text(
+                  '+${quest.expReward}XP',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey[600],
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                SizedBox(width: 16),
+                Icon(Icons.monetization_on, color: Colors.amber, size: 16),
+                SizedBox(width: 4),
+                Text(
+                  '+${quest.goldReward}G',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey[600],
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+            if (quest.boss != null) ...[
+              SizedBox(height: 12),
+              Container(
+                padding: EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.red[50],
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.red[200]!),
+                ),
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          quest.boss!.icon,
+                          style: TextStyle(fontSize: 20),
+                        ),
+                        SizedBox(width: 8),
+                        Text(
+                          quest.boss!.name,
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.red[700],
+                          ),
+                        ),
+                        Spacer(),
+                        Text(
+                          '${quest.boss!.currentHp}/${quest.boss!.maxHp}',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.red[600],
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                    SizedBox(height: 8),
+                    LinearProgressIndicator(
+                      value: quest.boss!.hpPercentage,
+                      backgroundColor: Colors.red[100],
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.red),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+            SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: quest.isCompleted 
+                    ? null 
+                    : () => _handleQuestAction(context, quest, gameProvider),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: quest.isCompleted ? Colors.grey : Colors.blue[600],
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                child: Text(
+                  quest.isCompleted 
+                      ? '完了済み'
+                      : quest.boss != null 
+                          ? quest.boss!.isDefeated 
+                              ? 'クエスト完了'
+                              : 'ボス戦闘'
+                          : 'クエスト完了',
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _handleQuestAction(BuildContext context, Quest quest, GameProvider gameProvider) {
+    if (quest.boss != null && !quest.boss!.isDefeated) {
+      _showBossBattleDialog(context, quest, gameProvider);
+    } else {
+      _completeQuest(context, quest, gameProvider);
+    }
+  }
+
+  void _showBossBattleDialog(BuildContext context, Quest quest, GameProvider gameProvider) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('⚔️ ボス戦闘'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('${quest.boss!.icon} ${quest.boss!.name}'),
+            SizedBox(height: 8),
+            Text('HP: ${quest.boss!.currentHp}/${quest.boss!.maxHp}'),
+            SizedBox(height: 16),
+            Text('攻撃方法を選択してください：'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('キャンセル'),
+          ),
+          TextButton(
+            onPressed: () => _performBossAttack(context, quest, gameProvider, '攻撃'),
+            child: Text('攻撃'),
+          ),
+          TextButton(
+            onPressed: () => _performBossAttack(context, quest, gameProvider, '強攻撃'),
+            child: Text('強攻撃'),
+          ),
+          TextButton(
+            onPressed: () => _performBossAttack(context, quest, gameProvider, '魔法攻撃'),
+            child: Text('魔法攻撃'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _performBossAttack(BuildContext context, Quest quest, GameProvider gameProvider, String action) async {
+    Navigator.pop(context);
+    
+    final isDefeated = await gameProvider.fightBoss(quest, action);
+    
+    if (isDefeated) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('🎉 ${quest.boss!.name}を倒しました！クエストを完了できます。'),
+          backgroundColor: Colors.green[600],
+          duration: Duration(seconds: 3),
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('⚔️ ${quest.boss!.name}に攻撃しました！'),
+          backgroundColor: Colors.orange[600],
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
+  void _completeQuest(BuildContext context, Quest quest, GameProvider gameProvider) async {
+    await gameProvider.completeQuest(quest);
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('🏆 クエスト「${quest.title}」を完了しました！ +${quest.expReward}XP +${quest.goldReward}G'),
+        backgroundColor: Colors.green[600],
+        duration: Duration(seconds: 3),
+      ),
+    );
+  }
+}
+
+// Pomodoro Screen
+class PomodoroScreen extends StatefulWidget {
+  @override
+  _PomodoroScreenState createState() => _PomodoroScreenState();
+}
+
+class _PomodoroScreenState extends State<PomodoroScreen> {
+  final CountDownController _controller = CountDownController();
+  bool _isRunning = false;
+  bool _isWorkTime = true;
+  int _workMinutes = 25;
+  int _breakMinutes = 5;
+  int _completedCycles = 0;
+  String? _selectedTaskId;
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<GameProvider>(
+      builder: (context, gameProvider, child) {
+        return Scaffold(
+          appBar: AppBar(
+            title: Text('🍅 ポモドーロタイマー'),
+            centerTitle: true,
+            backgroundColor: Colors.blue[800],
+            foregroundColor: Colors.white,
+          ),
+          body: Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Colors.blue[50]!, Colors.white],
+              ),
+            ),
+            child: SingleChildScrollView(
+              padding: EdgeInsets.all(16),
+              child: Column(
+                children: [
+                  // ヘッダー
+                  Container(
+                    padding: EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.grey.withOpacity(0.1),
+                          spreadRadius: 1,
+                          blurRadius: 8,
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      children: [
+                        Text(
+                          '🍅 ポモドーロテクニック',
+                          style: TextStyle(
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blue[800],
+                          ),
+                        ),
+                        SizedBox(height: 8),
+                        Text(
+                          '25分集中 → 5分休憩のサイクルで\n効率的に作業を進めましょう！',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.grey[600],
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                    ),
+                  ),
+                  SizedBox(height: 24),
+                  
+                  // タイマー設定
+                  if (!_isRunning) ...[
+                    Container(
+                      padding: EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.grey.withOpacity(0.1),
+                            spreadRadius: 1,
+                            blurRadius: 8,
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        children: [
+                          Text(
+                            '⚙️ タイマー設定',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.blue[800],
+                            ),
+                          ),
+                          SizedBox(height: 16),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  children: [
+                                    Text('作業時間'),
+                                    SizedBox(height: 8),
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        IconButton(
+                                          onPressed: () {
+                                            setState(() {
+                                              if (_workMinutes > 5) _workMinutes -= 5;
+                                            });
+                                          },
+                                          icon: Icon(Icons.remove),
+                                        ),
+                                        Text(
+                                          '${_workMinutes}分',
+                                          style: TextStyle(
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                        IconButton(
+                                          onPressed: () {
+                                            setState(() {
+                                              if (_workMinutes < 60) _workMinutes += 5;
+                                            });
+                                          },
+                                          icon: Icon(Icons.add),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Expanded(
+                                child: Column(
+                                  children: [
+                                    Text('休憩時間'),
+                                    SizedBox(height: 8),
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        IconButton(
+                                          onPressed: () {
+                                            setState(() {
+                                              if (_breakMinutes > 1) _breakMinutes -= 1;
+                                            });
+                                          },
+                                          icon: Icon(Icons.remove),
+                                        ),
+                                        Text(
+                                          '${_breakMinutes}分',
+                                          style: TextStyle(
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                        IconButton(
+                                          onPressed: () {
+                                            setState(() {
+                                              if (_breakMinutes < 30) _breakMinutes += 1;
+                                            });
+                                          },
+                                          icon: Icon(Icons.add),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                          SizedBox(height: 16),
+                          // タスク選択
+                          if (gameProvider.tasks.where((t) => !t.isCompleted).isNotEmpty) ...[
+                            Text(
+                              'タスクを選択（オプション）',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.grey[700],
+                              ),
+                            ),
+                            SizedBox(height: 8),
+                            DropdownButton<String?>(
+                              value: _selectedTaskId,
+                              hint: Text('タスクを選択'),
+                              isExpanded: true,
+                              items: [
+                                DropdownMenuItem<String?>(
+                                  value: null,
+                                  child: Text('なし'),
+                                ),
+                                ...gameProvider.tasks
+                                    .where((t) => !t.isCompleted)
+                                    .map((task) => DropdownMenuItem<String?>(
+                                          value: task.id,
+                                          child: Text(task.title),
+                                        )),
+                              ],
+                              onChanged: (value) {
+                                setState(() {
+                                  _selectedTaskId = value;
+                                });
+                              },
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    SizedBox(height: 24),
+                  ],
+                  
+                  // タイマー表示
+                  Container(
+                    padding: EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.grey.withOpacity(0.1),
+                          spreadRadius: 1,
+                          blurRadius: 8,
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      children: [
+                        Text(
+                          _isWorkTime ? '🎯 作業時間' : '☕ 休憩時間',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: _isWorkTime ? Colors.red[600] : Colors.green[600],
+                          ),
+                        ),
+                        SizedBox(height: 20),
+                        CircularCountDownTimer(
+                          duration: (_isWorkTime ? _workMinutes : _breakMinutes) * 60,
+                          initialDuration: 0,
+                          controller: _controller,
+                          width: 200,
+                          height: 200,
+                          ringColor: Colors.grey[300]!,
+                          fillColor: _isWorkTime ? Colors.red[400]! : Colors.green[400]!,
+                          backgroundColor: Colors.white,
+                          strokeWidth: 20.0,
+                          strokeCap: StrokeCap.round,
+                          textStyle: TextStyle(
+                            fontSize: 32.0,
+                            color: Colors.black,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          textFormat: CountdownTextFormat.MM_SS,
+                          isReverse: true,
+                          isReverseAnimation: true,
+                          isTimerTextShown: true,
+                          autoStart: false,
+                          onStart: () {
+                            setState(() {
+                              _isRunning = true;
+                            });
+                          },
+                          onComplete: () {
+                            _onTimerComplete(gameProvider);
+                          },
+                        ),
+                        SizedBox(height: 20),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                          children: [
+                            ElevatedButton(
+                              onPressed: () {
+                                if (_isRunning) {
+                                  _controller.pause();
+                                } else {
+                                  _controller.start();
+                                }
+                              },
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: _isRunning ? Colors.orange : Colors.green,
+                                foregroundColor: Colors.white,
+                              ),
+                              child: Text(_isRunning ? '一時停止' : '開始'),
+                            ),
+                            ElevatedButton(
+                              onPressed: () {
+                                _controller.reset();
+                                setState(() {
+                                  _isRunning = false;
+                                });
+                              },
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.red,
+                                foregroundColor: Colors.white,
+                              ),
+                              child: Text('リセット'),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  SizedBox(height: 24),
+                  
+                  // 統計情報
+                  Container(
+                    padding: EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.grey.withOpacity(0.1),
+                          spreadRadius: 1,
+                          blurRadius: 8,
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      children: [
+                        Text(
+                          '📊 今日の統計',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blue[800],
+                          ),
+                        ),
+                        SizedBox(height: 16),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                          children: [
+                            _buildStatCard('完了サイクル', '$_completedCycles', Colors.green),
+                            _buildStatCard('総セッション', '${gameProvider.pomodoroSessions.length}', Colors.blue),
+                            _buildStatCard('今日完了', '${gameProvider.pomodoroSessions.where((s) => s.isCompleted && _isToday(s.startTime)).length}', Colors.orange),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildStatCard(String label, String value, Color color) {
+    return Column(
+      children: [
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 24,
+            fontWeight: FontWeight.bold,
+            color: color,
+          ),
+        ),
+        SizedBox(height: 4),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            color: Colors.grey[600],
+          ),
+        ),
+      ],
+    );
+  }
+
+  bool _isToday(DateTime date) {
+    final now = DateTime.now();
+    return date.year == now.year && date.month == now.month && date.day == now.day;
+  }
+
+  void _onTimerComplete(GameProvider gameProvider) async {
+    setState(() {
+      _isRunning = false;
+    });
+
+    if (_isWorkTime) {
+      // 作業時間完了
+      _completedCycles++;
+      
+      // 実際のポモドーロセッションを作成・完了
+      await gameProvider.startPomodoroSession(taskId: _selectedTaskId);
+      final sessions = gameProvider.pomodoroSessions;
+      if (sessions.isNotEmpty) {
+        await gameProvider.completePomodoroSession(sessions.last.id);
+      }
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('🎉 作業時間完了！お疲れ様でした。+15XP +5G獲得！'),
+          backgroundColor: Colors.green[600],
+          duration: Duration(seconds: 3),
+        ),
+      );
+      
+      // 休憩時間に切り替え
+      setState(() {
+        _isWorkTime = false;
+      });
+      
+      _showBreakDialog();
+    } else {
+      // 休憩時間完了
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('☕ 休憩時間終了！次の作業を始めましょう。'),
+          backgroundColor: Colors.blue[600],
+          duration: Duration(seconds: 2),
+        ),
+      );
+      
+      // 作業時間に切り替え
+      setState(() {
+        _isWorkTime = true;
+      });
+    }
+  }
+
+  void _showBreakDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('🎉 作業完了！'),
+        content: Text('お疲れ様でした！${_breakMinutes}分間休憩しましょう。'),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _controller.start();
+            },
+            child: Text('休憩開始'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              setState(() {
+                _isWorkTime = true;
+              });
+            },
+            child: Text('スキップ'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    // CountDownControllerにはdisposeメソッドがないため削除
+    super.dispose();
   }
 }
 
